@@ -4,6 +4,20 @@ import (
 	"math"
 )
 
+// cosine simlarity between two normalized vectors
+func Cosine(a, b []float32) float32 {
+
+	var s float32
+	// dot product
+	for i := range a {
+		s += a[i]*b[i]
+	}
+
+	return s
+}
+
+
+
 // Leiden Metrics
 
 func Modularity(A Matrix) float64 {
@@ -53,5 +67,3 @@ func CPM(A Matrix, gamma float64) float64 {
 
 	return s 
 }
-
-
