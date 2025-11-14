@@ -92,7 +92,7 @@ type COO struct {
 }
 
 // Used for refinement step (BFS/DFS to split weakly/poorly connected parts)
-type RefineBuf struct {
+type RefineBuffers struct {
     Queue   []int32   // BFS/DFS queue
     Visited []int32   // visitation stamp per node (avoid allocating bool)
     Stamp   int32
