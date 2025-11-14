@@ -8,4 +8,5 @@ type OrderedPair struct{
 type Cell struct{
 	name string 
 	gene_expression map[string]float64
+	neighbors map[*Cell]float64
 }
