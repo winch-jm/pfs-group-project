@@ -26,6 +26,8 @@ type CSR struct {
     Data   []Weight  // edge weights parallel to Indices
     // Cached degrees (sum of weights) – required by modularity/CPM bookkeeping
     Degree []float32 // len N;  supports deltaQ math
+
+    TwoM float32
 }
 
 // Used throughout, P[i] = community id of node i;
