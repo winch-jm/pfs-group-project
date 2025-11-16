@@ -35,6 +35,31 @@ func InitializeCommStats(graph *CSR) *CommStats {
 	return cs
 }
 
+func InitializeCommStatsFromPartition(g *CSR, P Partition) *CommStats{
+	var maxC int32
+	for _, c := range P {
+		if c > maxC {
+			maxC = c
+		}
+	}
+
+	C := int(maxC) + 1
+
+	cs := &CommStats{
+		Tot:make([]float32, C),
+		Size:make([]int32, C),
+		In:nil,
+	}
+
+	for i := int32(0); i < g.N; i++ {
+		c := P[i]
+		cs.Tot[c] += g.Degree[i]
+		cs.Size[c]++
+	}
+
+	return cs
+}
+
 func (cs *CommStats) EnsureCapacity(c int32) {
 	if int(c) < len(cs.Tot) {
 		return // already large enough

@@ -3,55 +3,58 @@ package main
 // https://en.wikipedia.org/wiki/Leiden_algorithm
 import (
 	"fmt"
+	"math"
 )
 
 
-// Leiden skeleton
-// func LeidenCommunityDetection(dataset string) (Partition, LevelStats) {
-// 	// Preprocess 
-// 	// - load dense rows
-// 	dataset := InitializeDenseRows()
-// 	// - L2 normalize
-// 	dataset := L2Normalize(dataset)
-// 	// build KNN (output is a CSR)
+// Leiden Community Detection: https://www.nature.com/articles/s41598-019-41695-z
+func LeidenCommunityDetection(g *CSR, qualityFn QualityFn, selfLoop, gamma float32, maxSweeps, maxLevels, capGuess int) (Partition, []LevelStats) {
+
+	// Initialize
+	// - initialize partition
+	P := InitializePartition(g)
+	// - initiialize movebuffers
+	mb := InitializeMoveBuffers(capGuess)
+	// - initiialize refinebuffers
+	rb := InitializeRefineBuffers(g, capGuess)
+
+	// modularity/resolution params
+	cfg := QualityCfg{Fn:qualityFn,SelfLoop:selfLoop,Gamma:gamma}
+
+	statsList := make([]LevelStats,0)
+
 	
-// 	G := WeightedKNN(dataset)
-// 	// free memoryd from denseRows (no longer needed)
-// 	// graph does not change after KNN!!
+	// Iterate for maxLevels
+	for level := 0; level < maxLevels; level++ {
+		// reinitialize CommStats info every level
+		cs := InitializeCommStatsFromPartition(g,P)
 
+		// 1) Local moving (optimize quality with node moves)
+		moves, deltaQ := LocalMove(g, cfg, P, cs, mb, maxSweeps)
 
-// 	// Initialize
-// 	// - initialize partition
-// 	P := InitializePartition(dataset)
-// 	// - initialize community statistics
-// 	cs := InitializeCommStats()
-// 	// - initiialize movebuffers
-// 	mb := InitializeMoveBuf()
-// 	// - initiialize refinebuffers
-// 	rb := InitializeRefineBuf()
+		// termination condition
+		if moves == 0 && math.Abs(float64(deltaQ)) < 1e-4 {
+			break
+		}
 
+		// 2) Refinement (split poorly connected communities)
+		P = RefinePartition(g, P, rb)
 
+		// 3) Aggregation (contract communities --> supernodes)
+		// Aggregate()
 
-// 	// Iterate for maxLevels
-// 	for level := 0; level < maxLevels; level++ {
-// 		// 1) Local moving (optimize quality with node moves)
-// 		moves, deltaQ = LocalMove()
-//		// termination condition
-// 		if moves == 0 && math.Abs(deltaQ) < eps {
-// 			break
-// 		}
-// 		// 2) Refinement (split poorly connected communities)
-// 		Refine()
+		// Bookkeeping
+		levelStats := LevelStats{
+			Level:level, 
+			Quality:ComputeModularity(g,P), // need to implement other qualityFn for this
+			NumCommunities:CountCommunities(P), 
+			Moves:moves,
+		}
+		statsList = append(statsList,levelStats)
 
-// 		// 3) Aggregation (contract communities --> supernodes)
-// 		Aggregate()
-
-// 		// Bookkeeping
-
-// 		
-// 	}
-// 	// return final Partition, stats
-// }
+	}
+	return P, statsList
+}
 
 // LocalMove runs the Leiden/Louvain local moving phase.
 // Returns total accepted moves and total DeltaQ gain across all sweeps.
