@@ -1,7 +1,7 @@
 package main
 
 import (
-	"math"
+	// "math"
 )
 
 // cosine simlarity between two normalized vectors
@@ -16,54 +16,77 @@ func Cosine(a, b []float32) float32 {
 	return s
 }
 
-
-
 // Leiden Metrics
 
-func Modularity(A Matrix) float64 {
-	m := SumEdgeWeights()
-	s := 0
-	for i := range A {
-		for j := range A {
-			s += (A[i][j] - (sum_i*sum_j)/(2*m))*KroneckerDelta(ci,cj)
-		}
-	}
-
-	return 1.0/(2.0*m) * s 
-
+// Not completely accurate modularity calculations, but works for choosing best move
+func deltaQModularity(kin, ki, TotC, TwoM float32) float32 {
+	// ΔQ = ( k_i,in(c) - k_i * Tot_c / (2m) ) / (2m)
+	return (kin - ki*TotC/(TwoM))/TwoM
 }
 
-// Kronecker Delta function
-func KroneckerDelta(c1, c1 *Node) {
-	if c1.community == c2.community {
-		return 1.0
-	}
-	return 0.0
+// for sanity checking modularity
+func ComputeModularity(g *CSR, P Partition) float64 {
+
+    twoM := float64(g.TwoM)
+    if twoM == 0 {
+        return 0
+    }
+
+    // find max community id
+    maxC := int32(0)
+    for _, c := range P {
+        if c > maxC {
+            maxC = c
+        }
+    }
+    C := int(maxC) + 1
+
+    Tot := make([]float64, C)
+    In  := make([]float64, C)
+
+    // Tot[c] = sum of degrees in community c
+    for i := int32(0); i < g.N; i++ {
+        c := P[i]
+        Tot[c] += float64(g.Degree[i])
+    }
+
+    // In[c] = sum of internal weights in community c
+    // We’ll count each undirected edge once by only taking i<j
+    for i := int32(0); i < g.N; i++ {
+        ci := P[i]
+        rowStart := g.Indptr[i]
+        rowEnd   := g.Indptr[i+1]
+        for idx := rowStart; idx < rowEnd; idx++ {
+            j := g.Indices[idx]
+            if j <= i {
+                continue // avoid double-counting
+            }
+            if P[j] != ci {
+                continue
+            }
+            w := g.Data[idx]
+            In[ci] += float64(w)
+        }
+    }
+
+    var Q float64
+    for c := 0; c < C; c++ {
+        if Tot[c] == 0 {
+            continue
+        }
+        Q += In[c]/twoM - (Tot[c]*Tot[c])/(4*twoM*twoM)
+    }
+
+    return Q
 }
 
-// Reichardt Bornholdt Potts Model
-func RBPM(A Matrix, gamma float64) float64 {
-	m := SumEdgeWeights()
-	s := 0
-	for i := range A {
-		for j := range A {
-			s += (A[i][j] - gamma*(sum_i*sum_j)/(2*m))*KroneckerDelta(ci,cj)
-		}
-	}
-
-	return s 
-
+func deltaRBPM(kin,  ki, TotC, gamma, TwoM float32) float32 {
+	return (kin - gamma*ki*TotC/(TwoM))/TwoM
 }
 
-// Constant Potts Model
-func CPM(A Matrix, gamma float64) float64 {
-	m := SumEdgeWeights()
-	s := 0
-	for i := range A {
-		for j := range A {
-			s += (A[i][j] - gamma)*KroneckerDelta(ci,cj)
-		}
-	}
-
-	return s 
+func deltaCPM(kin, gamma float32, cSize int32) float32 {
+	return kin - gamma*float32(cSize)
 }
+
+
+

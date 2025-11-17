@@ -26,6 +26,8 @@ type CSR struct {
     Data   []Weight  // edge weights parallel to Indices
     // Cached degrees (sum of weights) – required by modularity/CPM bookkeeping
     Degree []float32 // len N;  supports deltaQ math
+
+    TwoM float32
 }
 
 // Used throughout, P[i] = community id of node i;
@@ -92,7 +94,7 @@ type COO struct {
 }
 
 // Used for refinement step (BFS/DFS to split weakly/poorly connected parts)
-type RefineBuf struct {
+type RefineBuffers struct {
     Queue   []int32   // BFS/DFS queue
     Visited []int32   // visitation stamp per node (avoid allocating bool)
     Stamp   int32
