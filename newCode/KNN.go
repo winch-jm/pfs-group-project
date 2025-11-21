@@ -1,162 +1,72 @@
 package main
 
 import (
+	// "container/heap"
+	// "crypto/x509"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"log"
-	"math"
 	"os"
 	"strconv"
 )
 
-// Example represents one row of the dataset.
-type Example struct {
-	Features []float64
-	Label    string
+type DenseRows struct {
+	// n rows (cells) × d columns (genes or features)
+	N, D int
+	Data []float32 // row-major: row i at Data[i*D:(i+1)*D]
 }
-
-// ----------------- Distance & weights -----------------
-
-// Euclidean distance between two feature vectors.
-func euclidean(a, b []float64) float64 {
-	if len(a) != len(b) {
-		log.Fatalf("dimension mismatch: %d vs %d", len(a), len(b))
-	}
-	var sum float64
-	for i := range a {
-		d := a[i] - b[i]
-		sum += d * d
-	}
-	return math.Sqrt(sum)
-}
-
-// Inverse-distance weight (with epsilon to avoid division by zero).
-func inverseDistance(dist float64) float64 {
-	const eps = 1e-9
-	if dist < eps {
-		dist = eps
-	}
-	return 1.0 / dist
-}
-
-// ----------------- kNN prediction -----------------
-
-// predictOne predicts the label for example at index idx, using all other
-// examples in train as neighbors, with weighted kNN.
-func predictOne(train []Example, idx int, k int) string {
-	query := train[idx].Features
-
-	// Collect distances to all other points.
-	type neighbor struct {
-		dist  float64
-		label string
-	}
-	nbs := make([]neighbor, 0, len(train)-1)
-	for j, ex := range train {
-		if j == idx {
-			continue // don't use the point itself as a neighbor
-		}
-		d := euclidean(query, ex.Features)
-		nbs = append(nbs, neighbor{dist: d, label: ex.Label})
-	}
-
-	// Select k nearest neighbors (simple O(n*k) partial selection).
-	if k > len(nbs) {
-		k = len(nbs)
-	}
-	for i := 0; i < k; i++ {
-		best := i
-		for j := i + 1; j < len(nbs); j++ {
-			if nbs[j].dist < nbs[best].dist {
-				best = j
-			}
-		}
-		nbs[i], nbs[best] = nbs[best], nbs[i]
-	}
-
-	// Weighted vote by inverse distance.
-	score := make(map[string]float64)
-	for i := 0; i < k; i++ {
-		w := inverseDistance(nbs[i].dist)
-		score[nbs[i].label] += w
-	}
-
-	// Pick label with highest weight.
-	var bestLabel string
-	bestScore := math.Inf(-1)
-	for lab, s := range score {
-		if s > bestScore {
-			bestScore = s
-			bestLabel = lab
-		}
-	}
-	return bestLabel
-}
-
-// ----------------- CSV loading -----------------
-
-// loadCSV loads a CSV where the last column is the label, the others are numeric features.
-func loadCSV(path string) ([]Example, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	records, err := r.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-	if len(records) < 2 {
-		return nil, fmt.Errorf("need at least header + 1 row")
-	}
-
-	// Skip header, assume last column is label.
-	var data []Example
-	for i, row := range records[1:] {
-		if len(row) < 2 {
-			return nil, fmt.Errorf("row %d has fewer than 2 columns", i+2)
-		}
-		features := make([]float64, len(row)-1)
-		for j := 0; j < len(row)-1; j++ {
-			v, err := strconv.ParseFloat(row[j], 64)
-			if err != nil {
-				return nil, fmt.Errorf("row %d col %d not numeric: %v", i+2, j+1, err)
-			}
-			features[j] = v
-		}
-		label := row[len(row)-1]
-		data = append(data, Example{Features: features, Label: label})
-	}
-	return data, nil
-}
-
-// ----------------- main -----------------
 
 func main() {
-	// Adjust this if your CSV has a different name.
-	const csvPath = "data.csv"
-
-	examples, err := loadCSV(csvPath)
+	file, err := os.Open("/Users/nethanramachandran/go/src/pfs-group-project/newCode/ctl_subset.csv")
 	if err != nil {
-		log.Fatalf("failed to load CSV: %v", err)
+		log.Fatalf("Error opening file: %v", err)
 	}
-	fmt.Printf("Loaded %d examples\n", len(examples))
 
-	k := 3 // number of neighbors
+	var file_dr DenseRows
 
-	// For each example, predict its label using the rest as training.
-	correct := 0
-	for i := range examples {
-		pred := predictOne(examples, i, k)
-		trueLabel := examples[i].Label
-		if pred == trueLabel {
-			correct++
+	defer file.Close()
+	reader := csv.NewReader(file)
+	firstRow := true
+	ctr := 0
+	for {
+		record, err := reader.Read()
+		if ctr > 0 {
+
+			if err == io.EOF {
+				fmt.Println("There was an error reading the cell")
+				break
+			}
+
+			if err != nil {
+				log.Fatalf("Error reading CSV: %v", err)
+			}
+
+			if firstRow {
+				file_dr.D = len(record)
+				firstRow = false
+			}
+
+			for i := range record {
+				str := record[i]
+				tempFloat, err := strconv.ParseFloat(str, 32)
+				fmt.Println(str)
+				if err != nil {
+					fmt.Println("there was an error parsing the string into a float32")
+					break
+
+				}
+				file_dr.Data = append(file_dr.Data, float32(tempFloat))
+			}
 		}
-		fmt.Printf("Example %d: true=%s  pred=%s\n", i, trueLabel, pred)
+		ctr++
+		file_dr.N++
 	}
 
-	acc := float64(correct) / float64(len(examples))
-	fmt.Printf("Accuracy (leave-one-out, k=%d): %.3f\n", k, acc)
+	fmt.Printf("Loaded matrix with %d rows and %d columns\n", file_dr.N, file_dr.D)
+	fmt.Printf("Data slice length: %d (should be N*D = %d)\n",
+		len(file_dr.Data), file_dr.N*file_dr.D)
+
 }
+
+// First thing: Turn CSV into denserows object
