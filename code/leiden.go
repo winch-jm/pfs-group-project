@@ -250,16 +250,18 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
             maxComm = cid
         }
     }
-    C := int(maxComm) + 1 // communities are 0..C-1
-    newN := C
 
+    newN := int(maxComm) + 1 // communities are 0..C-1
     // nodeToComm[i] is just partitionGraph[i]
     nodeToComm := partitionGraph
 
     // --- 2. Aggregate edge weights between communities ---
     type edgeKey struct {
         u, v int32
+		w float32
     }
+
+	//defines edges between two different communities
     edgeWeights := make(map[edgeKey]Weight)
 
     for u := 0; u < N; u++ {
@@ -269,7 +271,7 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
 
         for e := rowStart; e < rowEnd; e++ {
             v := int(graph.Indices[e])
-            if u > v { // skip symmetric copy (undirected CSR)
+            if u > v { 
                 continue
             }
             cv := nodeToComm[v]
@@ -284,24 +286,19 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
     }
 
     // --- 3. Convert aggregated map into adjacency lists ---
-    type nbr struct {
-        to int32
-        w  Weight
-    }
-    adj := make([][]nbr, newN)
+	//Fix this
+	fmt.Println(edgeWeights)
+    adj := make([][]edgeKey, newN)
 
     for k, w := range edgeWeights {
         cu, cv := k.u, k.v
-        if cu == cv {
-            // self-loop
-            adj[cu] = append(adj[cu], nbr{to: cv, w: w})
-        } else {
-            // undirected: store both directions
-            adj[cu] = append(adj[cu], nbr{to: cv, w: w})
-            adj[cv] = append(adj[cv], nbr{to: cu, w: w})
+		if cu != cv{
+            adj[cu] = append(adj[cu], edgeKey{u: cu, v: cv, w: w})
+            adj[cv] = append(adj[cv], edgeKey{u: cv, v: cu, w: w})
         }
     }
-
+	fmt.Println(adj)
+	fmt.Println(newN)
     // --- 4. Build CSR arrays for new graph ---
     newIndptr := make([]Idx, newN+1)
     totalEdges := 0
@@ -316,15 +313,16 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
 
     pos := 0
     for i := 0; i < newN; i++ {
-        for _, e := range adj[i] {
-            newIndices[pos] = NodeID(e.to)
-            newData[pos] = e.w
+        for _, edge := range adj[i] {
+            newIndices[pos] = NodeID(edge.v)
+            newData[pos] = edge.w
             pos++
         }
     }
 
     // --- 5. Degrees for each super-node ---
     newDegree := make([]float32, newN)
+	twoM := 0
     for i := 0; i < newN; i++ {
         sum := float32(0)
         start := int(newIndptr[i])
@@ -333,6 +331,7 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
             sum += float32(newData[k])
         }
         newDegree[i] = sum
+		twoM += sum
     }
 
     return &CSR{
@@ -341,5 +340,6 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
         Indices: newIndices,
         Data:   newData,
         Degree: newDegree,
+		TwoM: twoM
     }
 }
