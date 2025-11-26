@@ -322,7 +322,7 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
 
     // --- 5. Degrees for each super-node ---
     newDegree := make([]float32, newN)
-	twoM := 0
+	var twoM float32 
     for i := 0; i < newN; i++ {
         sum := float32(0)
         start := int(newIndptr[i])
@@ -340,6 +340,6 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
         Indices: newIndices,
         Data:   newData,
         Degree: newDegree,
-		TwoM: twoM
+		TwoM: twoM,
     }
 }

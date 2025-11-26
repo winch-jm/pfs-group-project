@@ -1,133 +1,136 @@
 package main
 
 import (
-	"encoding/csv"
-	"fmt"
-	"log"
-	"math"
-	"os"
-	"strconv"
+	"container/heap"
+   //"fmt"
+	//"strconv"
 )
 
-// Example represents one row of the dataset.
-type Example struct {
-	Features []float64
-	Label    string
+
+
+
+
+// MaxHeap is a max-heap of ints.
+
+type MaxHeap []*IndexScore
+
+func (h MaxHeap) Len() int           { return len(h) }
+func (h MaxHeap) Less(i, j int) bool { return h[i].similarity > h[j].similarity }
+func (h MaxHeap) Swap(i, j int) {
+    h[i], h[j] = h[j], h[i]
+    h[i].heapIdx = i
+    h[j].heapIdx = j
 }
 
-// ----------------- Distance & weights -----------------
-
-// Euclidean distance between two feature vectors.
-func euclidean(a, b []float64) float64 {
-	if len(a) != len(b) {
-		log.Fatalf("dimension mismatch: %d vs %d", len(a), len(b))
-	}
-	var sum float64
-	for i := range a {
-		d := a[i] - b[i]
-		sum += d * d
-	}
-	return math.Sqrt(sum)
+func (h *MaxHeap) Push(x any) {
+    item := x.(*IndexScore)
+    item.heapIdx = len(*h)
+    *h = append(*h, item)
 }
 
-// Inverse-distance weight (with epsilon to avoid division by zero).
-func inverseDistance(dist float64) float64 {
-	const eps = 1e-9
-	if dist < eps {
-		dist = eps
-	}
-	return 1.0 / dist
+func (h *MaxHeap) Pop() any {
+    old := *h
+    n := len(old)
+    item := old[n-1]
+    *h = old[:n-1]
+    item.heapIdx = -1 // optional: mark as "not in heap" 
+    return item
+}
+func WeightedKNN(dr DenseRows, k int) *CSR{
+	adjacencyMatrix := Similarities(dr, k)
+	return GraphCreation(adjacencyMatrix, dr)
 }
 
-// ----------------- kNN prediction -----------------
+func Similarities(dr DenseRows, k int) [][]float32 {
+    n := dr.N
 
-// predictOne predicts the label for example at index idx, using all other
-// examples in train as neighbors, with weighted kNN.
-func predictOne(train []Example, idx int, k int) string {
-	query := train[idx].Features
+    // adjacency[i][j] = similarity between i and j (0 if not among top-k)
+    adjacencyMatrix := make([][]float32, n)
+    for i := range adjacencyMatrix {
+        adjacencyMatrix[i] = make([]float32, n)
+    }
 
-	// Collect distances to all other points.
-	type neighbor struct {
-		dist  float64
-		label string
-	}
-	nbs := make([]neighbor, 0, len(train)-1)
-	for j, ex := range train {
-		if j == idx {
-			continue // don't use the point itself as a neighbor
-		}
-		d := euclidean(query, ex.Features)
-		nbs = append(nbs, neighbor{dist: d, label: ex.Label})
-	}
+    for i := 0; i < n; i++ {
+        scores := make([]*IndexScore, 0, n-1)
 
-	// Select k nearest neighbors (simple O(n*k) partial selection).
-	if k > len(nbs) {
-		k = len(nbs)
-	}
-	for i := 0; i < k; i++ {
-		best := i
-		for j := i + 1; j < len(nbs); j++ {
-			if nbs[j].dist < nbs[best].dist {
-				best = j
-			}
-		}
-		nbs[i], nbs[best] = nbs[best], nbs[i]
-	}
+        rowI := dr.Data[i*dr.D : (i+1)*dr.D]
+        for j := 0; j < n; j++ {
+            if i == j {
+                continue
+            }
+            rowJ := dr.Data[j*dr.D : (j+1)*dr.D]
+            sim := Cosine(rowI, rowJ) // you should already have this function
+            scores = append(scores, &IndexScore{
+                similarity: sim,
+                index:  int32(j),
+            })
+        }
 
-	// Weighted vote by inverse distance.
-	score := make(map[string]float64)
-	for i := 0; i < k; i++ {
-		w := inverseDistance(nbs[i].dist)
-		score[nbs[i].label] += w
-	}
+        // Build max-heap
+        h := MaxHeap(scores)
+        heap.Init(&h)
 
-	// Pick label with highest weight.
-	var bestLabel string
-	bestScore := math.Inf(-1)
-	for lab, s := range score {
-		if s > bestScore {
-			bestScore = s
-			bestLabel = lab
-		}
-	}
-	return bestLabel
+        // Take top-k neighbors
+        for x := 0; x < k && h.Len() > 0; x++ {
+            item := heap.Pop(&h).(*IndexScore)
+            j := item.index
+            adjacencyMatrix[i][j] = item.similarity
+            adjacencyMatrix[j][i] = item.similarity // make it symmetric
+        }
+    }
+
+    return adjacencyMatrix
 }
 
-// ----------------- CSV loading -----------------
+func GraphCreation(ad [][]float32, dr DenseRows) *CSR {
+    n := dr.N
 
-// loadCSV loads a CSV where the last column is the label, the others are numeric features.
-func loadCSV(path string) ([]Example, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
+    newIndptr := make([]Idx, n+1)
+    newIndices := make([]NodeID, 0)
+    newData := make([]Weight, 0)
+    newDegree := make([]float32, n)
+    totalEdges := 0
+    var twoM float32 // keep this as float32 to match CSR.TwoM
 
-	r := csv.NewReader(f)
-	records, err := r.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-	if len(records) < 2 {
-		return nil, fmt.Errorf("need at least header + 1 row")
-	}
+    newIndptr[0] = 0
 
-	// Skip header, assume last column is label.
-	var data []Example
-	for i, row := range records[1:] {
-		if len(row) < 2 {
-			return nil, fmt.Errorf("row %d has fewer than 2 columns", i+2)
-		}
-		features := make([]float64, len(row)-1)
-		for j := 0; j < len(row)-1; j++ {
-			v, err := strconv.ParseFloat(row[j], 64)
-			if err != nil {
-				return nil, fmt.Errorf("row %d col %d not numeric: %v", i+2, j+1, err)
-			}
-			features[j] = v
-		}
-		label := row[len(row)-1]
-		data = append(data, Example{Features: features, Label: label})
-	}
-	return data, nil
+    for cell := 0; cell < n; cell++ {
+        row := ad[cell]
+        var deg float32
+        for j, w := range row {
+            if w != 0 {
+                newIndices = append(newIndices, NodeID(j))
+                newData = append(newData, Weight(w))
+                deg += w
+                totalEdges++
+            }
+        }
+
+        newIndptr[cell+1] = Idx(totalEdges)
+        newDegree[cell] = deg
+        twoM += deg
+    }
+
+    return &CSR{
+        N:       int32(n),      // number of nodes = number of rows (cells)
+        Indptr:  newIndptr,
+        Indices: newIndices,
+        Data:    newData,
+        Degree:  newDegree,
+        TwoM:    twoM,
+    }
 }
+// func AddandCountNonZero(vals []float32, newIndices []NodeID, newData []Weight)(int, float32){
+// 	sm := 0
+// 	degree := 0.0
+// 	for x := range vals{
+// 		if vals[x] != 0{
+// 			sm ++
+// 			newIndices = append(newIndices, NodeID(x))
+// 			newData = append(newData, Weight(vals[x]))
+// 			degree = float32(degree) + vals[x]
+
+// 		}
+// 	}
+// 	return sm, degree
+// }

@@ -98,3 +98,9 @@ type RefineBuffers struct {
     Visited []int32   // visitation stamp per node (avoid allocating bool)
     Stamp   int32
 }
+
+type IndexScore struct{
+    similarity float32
+    index int32
+    heapIdx int
+}
