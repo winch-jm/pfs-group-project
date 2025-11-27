@@ -239,9 +239,13 @@ func RefinePartition(g *CSR, P Partition, rb *RefineBuffers) Partition {
 
 func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
     N := int(graph.N)
+	for x, _ := range len(aggregationMap){
+		aggregationMap[x] = partitionGraph[aggregationMap[x]]
+	}
     if len(partitionGraph) != N {
         panic("Aggregation: partition length != number of nodes")
     }
+
 
     // --- 1. Get number of communities C from partitionGraph ---
     maxComm := int32(0)

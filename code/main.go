@@ -9,11 +9,15 @@ func main(){
 
 	// Preprocess 
 	// - load dense rows
-	file := "ctl_subset.csv"
+	file := "data/ctl_subset.csv"
 	k := 30
+	aggregationMap := AggMap{}
+
 	// dataset := CSVToDenseRows(file)
 	dataset := CSVToDenseRows(file)
-	fmt.Println("hello")
+	for x, _ := range dataset.N{
+		aggregationMap = append(aggregationMap,	int32(x))
+	}
 	// - L2 normalize
 	dataset = NormalizeDenseRows(dataset)
 	// // build KNN (output is a CSR)
