@@ -237,7 +237,113 @@ func RefinePartition(g *CSR, P Partition, rb *RefineBuffers) Partition {
 	return refined
 }
 
+func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
+    N := int(graph.N)
+	for x, _ := range len(aggregationMap){
+		aggregationMap[x] = partitionGraph[aggregationMap[x]]
+	}
+    if len(partitionGraph) != N {
+        panic("Aggregation: partition length != number of nodes")
+    }
 
-// func Aggegrate() {
 
-// }
+    // --- 1. Get number of communities C from partitionGraph ---
+    maxComm := int32(0)
+    for _, cid := range partitionGraph {
+        if cid > maxComm {
+            maxComm = cid
+        }
+    }
+
+    newN := int(maxComm) + 1 // communities are 0..C-1
+    // nodeToComm[i] is just partitionGraph[i]
+    nodeToComm := partitionGraph
+
+    // --- 2. Aggregate edge weights between communities ---
+    type edgeKey struct {
+        u, v int32
+		w float32
+    }
+
+	//defines edges between two different communities
+    edgeWeights := make(map[edgeKey]Weight)
+
+    for u := 0; u < N; u++ {
+        cu := nodeToComm[u]
+        rowStart := int(graph.Indptr[u])
+        rowEnd := int(graph.Indptr[u+1])
+
+        for e := rowStart; e < rowEnd; e++ {
+            v := int(graph.Indices[e])
+            if u > v { 
+                continue
+            }
+            cv := nodeToComm[v]
+
+            a, b := cu, cv
+            if a > b {
+                a, b = b, a
+            }
+            k := edgeKey{u: a, v: b}
+            edgeWeights[k] += graph.Data[e]
+        }
+    }
+
+    // --- 3. Convert aggregated map into adjacency lists ---
+	//Fix this
+	fmt.Println(edgeWeights)
+    adj := make([][]edgeKey, newN)
+
+    for k, w := range edgeWeights {
+        cu, cv := k.u, k.v
+		if cu != cv{
+            adj[cu] = append(adj[cu], edgeKey{u: cu, v: cv, w: w})
+            adj[cv] = append(adj[cv], edgeKey{u: cv, v: cu, w: w})
+        }
+    }
+	fmt.Println(adj)
+	fmt.Println(newN)
+    // --- 4. Build CSR arrays for new graph ---
+    newIndptr := make([]Idx, newN+1)
+    totalEdges := 0
+    for i := 0; i < newN; i++ {
+        newIndptr[i] = Idx(totalEdges)
+        totalEdges += len(adj[i])
+    }
+    newIndptr[newN] = Idx(totalEdges)
+
+    newIndices := make([]NodeID, totalEdges)
+    newData := make([]Weight, totalEdges)
+
+    pos := 0
+    for i := 0; i < newN; i++ {
+        for _, edge := range adj[i] {
+            newIndices[pos] = NodeID(edge.v)
+            newData[pos] = edge.w
+            pos++
+        }
+    }
+
+    // --- 5. Degrees for each super-node ---
+    newDegree := make([]float32, newN)
+	var twoM float32 
+    for i := 0; i < newN; i++ {
+        sum := float32(0)
+        start := int(newIndptr[i])
+        end := int(newIndptr[i+1])
+        for k := start; k < end; k++ {
+            sum += float32(newData[k])
+        }
+        newDegree[i] = sum
+		twoM += sum
+    }
+
+    return &CSR{
+        N:      int32(newN),
+        Indptr: newIndptr,
+        Indices: newIndices,
+        Data:   newData,
+        Degree: newDegree,
+		TwoM: twoM,
+    }
+}

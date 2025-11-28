@@ -26,7 +26,6 @@ type CSR struct {
     Data   []Weight  // edge weights parallel to Indices
     // Cached degrees (sum of weights) – required by modularity/CPM bookkeeping
     Degree []float32 // len N;  supports deltaQ math
-
     TwoM float32
 }
 
@@ -98,4 +97,10 @@ type RefineBuffers struct {
     Queue   []int32   // BFS/DFS queue
     Visited []int32   // visitation stamp per node (avoid allocating bool)
     Stamp   int32
+}
+
+type IndexScore struct{
+    similarity float32
+    index int32
+    heapIdx int
 }
