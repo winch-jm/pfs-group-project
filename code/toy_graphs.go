@@ -1,4 +1,4 @@
-// TOY GRAPHS FOR TESTING
+// TOY GRAPHS FOR TESTING/DEMOS
 package main
 
 

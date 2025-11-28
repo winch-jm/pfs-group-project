@@ -50,6 +50,7 @@ func LeidenCommunityDetection(g *CSR, qualityFn QualityFn, selfLoop, gamma float
 			NumCommunities:CountCommunities(P), 
 			Moves:moves,
 		}
+
 		statsList = append(statsList,levelStats)
 
 	}
@@ -102,7 +103,6 @@ func LocalMoveSweep(
 		cs.Tot[currComm] -= ki
 		cs.Size[currComm]--
 
-		
 		// accumulate k_i,in(c) over neighbor communities
 		mb.Reset()
 		for idx := g.Indptr[i]; idx < g.Indptr[i+1]; idx++ {
@@ -237,6 +237,7 @@ func RefinePartition(g *CSR, P Partition, rb *RefineBuffers) Partition {
 	return refined
 }
 
+
 // func Aggegrate() {
-	
+
 // }
