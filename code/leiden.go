@@ -239,9 +239,13 @@ func RefinePartition(g *CSR, P Partition, rb *RefineBuffers) Partition {
 
 func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
     N := int(graph.N)
+	for x, _ := range len(aggregationMap){
+		aggregationMap[x] = partitionGraph[aggregationMap[x]]
+	}
     if len(partitionGraph) != N {
         panic("Aggregation: partition length != number of nodes")
     }
+
 
     // --- 1. Get number of communities C from partitionGraph ---
     maxComm := int32(0)
@@ -322,7 +326,7 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
 
     // --- 5. Degrees for each super-node ---
     newDegree := make([]float32, newN)
-	twoM := 0
+	var twoM float32 
     for i := 0; i < newN; i++ {
         sum := float32(0)
         start := int(newIndptr[i])
@@ -340,6 +344,6 @@ func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
         Indices: newIndices,
         Data:   newData,
         Degree: newDegree,
-		TwoM: twoM
+		TwoM: twoM,
     }
 }
