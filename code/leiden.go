@@ -17,6 +17,10 @@ func LeidenCommunityDetection(g *CSR, qualityFn QualityFn, selfLoop, gamma float
 	mb := InitializeMoveBuffers(capGuess)
 	// - initiialize refinebuffers
 	rb := InitializeRefineBuffers(g, capGuess)
+	aggregationMap := AggMap{}
+	for x := 0; x < int(g.N); x++{
+		aggregationMap = append(aggregationMap,	int32(x))
+	}
 
 	// modularity/resolution params
 	cfg := QualityCfg{Fn:qualityFn,SelfLoop:selfLoop,Gamma:gamma}
@@ -42,6 +46,7 @@ func LeidenCommunityDetection(g *CSR, qualityFn QualityFn, selfLoop, gamma float
 
 		// 3) Aggregation (contract communities --> supernodes)
 		// Aggregate()
+		g = Aggregation(g, P, aggregationMap)
 
 		// Bookkeeping
 		levelStats := LevelStats{
@@ -237,9 +242,9 @@ func RefinePartition(g *CSR, P Partition, rb *RefineBuffers) Partition {
 	return refined
 }
 
-func Aggregation(graph *CSR, partitionGraph Partition) *CSR {
+func Aggregation(graph *CSR, partitionGraph Partition, aggregationMap AggMap) *CSR {
     N := int(graph.N)
-	for x, _ := range len(aggregationMap){
+	for x := 0 ; x < len(aggregationMap); x++{
 		aggregationMap[x] = partitionGraph[aggregationMap[x]]
 	}
     if len(partitionGraph) != N {
