@@ -27,9 +27,10 @@ func LeidenCommunityDetection(g *CSR, qualityFn QualityFn, selfLoop, gamma float
 
 	statsList := make([]LevelStats,0)
 
-	
+	fmt.Println("Beginning Leiden...")
 	// Iterate for maxLevels
 	for level := 0; level < maxLevels; level++ {
+		fmt.Println("Level: ", level)
 		// reinitialize CommStats info every level
 		cs := InitializeCommStatsFromPartition(g,P)
 
@@ -44,21 +45,35 @@ func LeidenCommunityDetection(g *CSR, qualityFn QualityFn, selfLoop, gamma float
 		// 2) Refinement (split poorly connected communities)
 		P = RefinePartition(g, P, rb)
 
+		// compute quality for level
+		quality := ComputeModularity(g,P)
+		numComms := CountCommunities(P)
+
 		// 3) Aggregation (contract communities --> supernodes)
 		// Aggregate()
 		g = Aggregation(g, P, aggregationMap)
 
+		// Put supernodes in separate communities in new graph
+		P = InitializePartition(g)
+
 		// Bookkeeping
 		levelStats := LevelStats{
 			Level:level, 
-			Quality:ComputeModularity(g,P), // need to implement other qualityFn for this
-			NumCommunities:CountCommunities(P), 
+			Quality:quality, // need to implement other qualityFn for this
+			NumCommunities:numComms, 
 			Moves:moves,
 		}
-		statsList = append(statsList,levelStats)
 
+		statsList = append(statsList,levelStats)
 	}
-	return P, statsList
+
+	origP := make(Partition, len(aggregationMap))
+	for i := range aggregationMap {
+		origP[i] = P[aggregationMap[i]]
+	}
+
+	fmt.Println("Done!")
+	return origP, statsList
 }
 
 // LocalMove runs the Leiden/Louvain local moving phase.
@@ -107,7 +122,6 @@ func LocalMoveSweep(
 		cs.Tot[currComm] -= ki
 		cs.Size[currComm]--
 
-		
 		// accumulate k_i,in(c) over neighbor communities
 		mb.Reset()
 		for idx := g.Indptr[i]; idx < g.Indptr[i+1]; idx++ {
@@ -154,7 +168,7 @@ func LocalMoveSweep(
 
 		}
 
-		Qbefore := ComputeModularity(g, P)  // uses float64, full recompute
+		// Qbefore := ComputeModularity(g, P)  // uses float64, full recompute
 
 		// Commit: move if positive gain; else reinsert into comm
 		if bestDelta > 0 && bestC != currComm {
@@ -162,10 +176,10 @@ func LocalMoveSweep(
 			cs.Tot[bestC] += float32(ki)
 			cs.Size[bestC]++
 
-			Qafter := ComputeModularity(g, P)
+			// Qafter := ComputeModularity(g, P)
 
-			fmt.Printf("Move node %d: %d -> %d, bestDelta=%.6f, Qdiff=%.6f\n",
-				i, currComm, bestC, bestDelta, Qafter-Qbefore)
+			// fmt.Printf("Move node %d: %d -> %d, bestDelta=%.6f, Qdiff=%.6f\n",
+			// 	i, currComm, bestC, bestDelta, Qafter-Qbefore)
 			movesThis++
 			gainsThis += bestDelta
 		} else {
@@ -296,18 +310,22 @@ func Aggregation(graph *CSR, partitionGraph Partition, aggregationMap AggMap) *C
 
     // --- 3. Convert aggregated map into adjacency lists ---
 	//Fix this
-	fmt.Println(edgeWeights)
+	// fmt.Println(edgeWeights)
     adj := make([][]edgeKey, newN)
 
     for k, w := range edgeWeights {
         cu, cv := k.u, k.v
-		if cu != cv{
+		if cu == cv {
+			// self-loop
+        	adj[cu] = append(adj[cu], edgeKey{u: cu, v: cu, w: w})
+		} else {
+			// undirected edge
             adj[cu] = append(adj[cu], edgeKey{u: cu, v: cv, w: w})
             adj[cv] = append(adj[cv], edgeKey{u: cv, v: cu, w: w})
         }
     }
-	fmt.Println(adj)
-	fmt.Println(newN)
+	// fmt.Println(adj)
+	// fmt.Println(newN)
     // --- 4. Build CSR arrays for new graph ---
     newIndptr := make([]Idx, newN+1)
     totalEdges := 0

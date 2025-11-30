@@ -19,7 +19,7 @@ func CountCommunities(P Partition) int {
     return len(seen)
 }
 
-func CSVToDenseRows(filename string) DenseRows {
+func CSVToDenseRows(filename string) ([]string,DenseRows) {
 	f, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("Error opening file %q: %v", filename, err)
@@ -29,8 +29,12 @@ func CSVToDenseRows(filename string) DenseRows {
 	reader := csv.NewReader(f)
 
 	var dr DenseRows
+	sigIds := make([]string,0)
 	rowNum := 0
 	for {
+		// if rowNum > 500 {
+		// 	break
+		// }
 
 		record, err := reader.Read()
 		if rowNum > 0{
@@ -40,9 +44,12 @@ func CSVToDenseRows(filename string) DenseRows {
 		if err != nil {
 			log.Fatalf("Error reading CSV: %v", err)
 		}
-		dr.D = len(record) - 1
+		dr.D = len(record) - 2
 		for ind , str := range record {
-			if ind > 0{
+			if ind == 1 {
+				sigIds = append(sigIds,str)
+
+			} else if ind > 1{
 			tempFloat, err := strconv.ParseFloat(str, 32)
 			if err != nil {
 				log.Fatalf("Error parsing %q as float32: %v", str, err)
@@ -59,10 +66,11 @@ func CSVToDenseRows(filename string) DenseRows {
 	fmt.Printf("Data slice length: %d (should be N*D = %d)\n",
 		len(dr.Data), dr.N*dr.D)
 
-	return dr
+	return sigIds, dr
 }
 
 func NormalizeDenseRows(dr DenseRows) DenseRows {
+	fmt.Printf("Normalizing data (zero mean, dividing by L2 norm)...\n")
     // 1. Compute mean of each gene (column)
     means := make([]float32, dr.D)
     for gene := 0; gene < dr.D; gene++ {
