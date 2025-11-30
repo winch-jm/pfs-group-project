@@ -2,7 +2,7 @@ package main
 
 import (
 	"container/heap"
-   //"fmt"
+   "fmt"
 	//"strconv"
 )
 
@@ -37,7 +37,10 @@ func (h *MaxHeap) Pop() any {
     return item
 }
 func WeightedKNN(dr DenseRows, k int) *CSR{
+    fmt.Printf("Running Weight KNN:\n")
+    fmt.Printf("Creating Adjacency Matrix..\n")
 	adjacencyMatrix := Similarities(dr, k)
+    fmt.Printf("Constructing Graph...\n")
 	return GraphCreation(adjacencyMatrix, dr)
 }
 

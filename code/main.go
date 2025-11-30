@@ -2,62 +2,38 @@ package main
 
 import(
 	"fmt"
-	//"log"
+	"log"
 )
 
 func main(){
 
 	// Preprocess 
-	// - load dense rows
-	file := "data/ctl_subset.csv"
-	k := 30
-	aggregationMap := AggMap{}
+	// // - load dense rows
+	file := "../data/MCF7_subset.csv"
+	k := 25
+	
+	sigIds, dataset := CSVToDenseRows(file)
 
-	// dataset := CSVToDenseRows(file)
-	dataset := CSVToDenseRows(file)
-	for x, _ := range dataset.N{
-		aggregationMap = append(aggregationMap,	int32(x))
-	}
 	// - L2 normalize
 	dataset = NormalizeDenseRows(dataset)
-	// // build KNN (output is a CSR)
+
+	// build KNN (output is a CSR)
 	g := WeightedKNN(dataset, k)
 
+	// g := DummyTwoCliques()
 	//free memory from denseRows (no longer needed)
+	dataset = DenseRows{}
 	//graph does not change after KNN!!
 
-	//Test Local Moving and Refinement
-	// g := DummyTwoCliques()
-	// pG := Partition{0,0,0,1,1,1}
-	// Aggregation(g, pG)
+	// L
+	P, levelStats := LeidenCommunityDetection(g, RBPM, 0.001, 1.0, 10, 10, 32)
+	fmt.Println(len(P),P)
+	fmt.Println(levelStats)
 
-	modTypes := []QualityFn{Modularity,RBPM,CPM}
-	var P Partition
-	for _,modFn := range modTypes {
-		P, levelStats := LeidenCommunityDetection(g, modFn, 0.0, 0.5, 10, 10, 32)
-		fmt.Println(P)
-		fmt.Println(levelStats)
+	g.WriteEdgeListCSV("../data/graph_edges_mcf7.csv",true)
+	// ... run leiden, get origP ...
+	if err := WriteFinalPartitionCSV(sigIds, P, "../data/partition_mcf7.csv"); err != nil {
+		log.Fatal(err)
 	}
-	
-	
-	// P_initial := make(Partition,int(g.N))
-	// copy(P_initial, P)
 
-
-	
-
-	// // Q0 := ComputeModularity(g, P)
-	// _,_ = LocalMove(g,cfg,P,cs,mb,10)
-	// P_unrefined := P
-	
-
-	// P_refined := RefinePartition(g, P, rb)
-
-	g_new := Aggregation(g, P)
-	fmt.Println(g_new)
-
-
-	// fmt.Println("Initial Partition: ", P_initial)
-	// fmt.Println("After Local Moving: ", P_unrefined)
-	// fmt.Println("After Refinement: ", P_refined)
 }

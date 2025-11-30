@@ -58,7 +58,7 @@ func ComputeModularity(g *CSR, P Partition) float64 {
         rowEnd   := g.Indptr[i+1]
         for idx := rowStart; idx < rowEnd; idx++ {
             j := g.Indices[idx]
-            if j <= i {
+            if j < i {
                 continue // avoid double-counting
             }
             if P[j] != ci {
