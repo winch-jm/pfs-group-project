@@ -1,4 +1,5 @@
 library(shiny)
+library(ggalluvial)
 # -------------------------------------------------------------------------
 # SERVER
 # -------------------------------------------------------------------------
@@ -396,6 +397,40 @@ server <- function(input, output, session) {
     enr
   })
   
+  moa_entropy_data <- reactive({
+    df <- filtered_nodes() %>%
+      # keep only labeled MoAs
+      dplyr::filter(!is.na(moa)) %>%
+      dplyr::mutate(
+        moa_clean = trimws(moa)
+      ) %>%
+      dplyr::filter(moa_clean != "\"\"")
+    
+    if (nrow(df) == 0) return(NULL)
+    
+    # counts of labeled MoAs per community
+    comm_moa_counts <- df %>%
+      dplyr::count(community, moa_clean, name = "n")
+    
+    # per-community entropy + dominant MoA
+    comm_moa_counts %>%
+      dplyr::group_by(community) %>%
+      dplyr::summarise(
+        n_drugs = sum(n),
+        k_moa   = dplyr::n(),
+        # normalized Shannon entropy: 0 = pure, 1 = maximally mixed
+        entropy = {
+          p <- n / sum(n)
+          H <- -sum(p * log(p))
+          if (dplyr::n() > 1) H / log(dplyr::n()) else 0
+        },
+        dominant_moa = moa_clean[which.max(n)],
+        dom_frac     = max(n / sum(n)),
+        .groups = "drop"
+      ) %>%
+      dplyr::filter(n_drugs > 0)
+  })
+  
   
   output$moa_enrichment <- renderPlot({
     enr <- moa_data()
@@ -484,9 +519,9 @@ server <- function(input, output, session) {
     df <- df %>%
       mutate(
         label = case_when(
-          mean_tas >= quantile(mean_tas, 0.90) ~ as.character(community),
-          mean_tas <= quantile(mean_tas, 0.10) ~ as.character(community),
-          n_drugs  >= quantile(n_drugs, 0.90)  ~ as.character(community),
+          # mean_tas >= quantile(mean_tas, 0.90) ~ as.character(community),
+          # mean_tas <= quantile(mean_tas, 0.10) ~ as.character(community),
+          # n_drugs  >= quantile(n_drugs, 0.90)  ~ as.character(community),
           TRUE ~ ""
         )
       )
@@ -636,5 +671,562 @@ server <- function(input, output, session) {
     dplyr::arrange(level, dplyr::desc(n_drugs))
 })
 
+  output$edge_ridge_all <- renderPlot({
+    # keep only edges where both endpoints are in the same community
+    df <- edge_comm %>%
+      dplyr::filter(!is.na(comm_src), !is.na(comm_dst), comm_src == comm_dst) %>%
+      dplyr::transmute(
+        community = comm_src,
+        weight    = weight
+      )
+    
+    if (nrow(df) == 0) return(NULL)
+    
+    # per-community summary: median + IQR + n_edges
+    stats <- df %>%
+      dplyr::group_by(community) %>%
+      dplyr::summarise(
+        median_w = median(weight, na.rm = TRUE),
+        q25      = quantile(weight, 0.25, na.rm = TRUE),
+        q75      = quantile(weight, 0.75, na.rm = TRUE),
+        n_edges  = dplyr::n(),
+        .groups  = "drop"
+      ) %>%
+      dplyr::mutate(
+        # label shows community + number of edges
+        community_label = paste0(community, " (n=", n_edges, ")")
+      )
+    
+    # join stats back to each edge & order communities by median weight
+    df2 <- df %>%
+      dplyr::left_join(stats %>% dplyr::select(community, median_w, n_edges, community_label),
+                       by = "community") %>%
+      dplyr::mutate(
+        community_label = stats::reorder(community_label, median_w)
+      )
+    
+    # same ordering + labels for stats table (for vlines)
+    stats2 <- stats %>%
+      dplyr::mutate(
+        community_label = stats::reorder(community_label, median_w)
+      )
+    
+    ggplot(df2, aes(x = weight, y = community_label, fill = median_w)) +
+      # main ridges
+      ggridges::geom_density_ridges(
+        alpha          = 0.8,
+        scale          = 1.2,
+        rel_min_height = 0.01,
+        color          = "black",
+        size           = 0.25
+      ) +
+      # # optional rug: comment out if it’s too dense
+      # geom_rug(alpha = 0.05, sides = "b") +
+      # # median (dashed) and IQR (dotted) lines
+      # geom_vline(
+      #   data = stats2,
+      #   aes(xintercept = median_w),
+      #   linetype = "dashed",
+      #   alpha    = 0.35
+      # ) +
+      # geom_vline(
+      #   data = stats2,
+      #   aes(xintercept = q25),
+      #   linetype = "dotted",
+      #   alpha    = 0.25
+      # ) +
+      # geom_vline(
+      #   data = stats2,
+      #   aes(xintercept = q75),
+      #   linetype = "dotted",
+      #   alpha    = 0.25
+      # ) +
+      scale_fill_viridis_c(
+        option = "A",
+        name   = "Median\nedge weight"
+      ) +
+      labs(
+        title = "Within-community signature-level edge weights (all communities)",
+        x     = "Edge weight",
+        y     = "Community (ordered by median weight)"
+      ) +
+      theme_minimal() +
+      theme(
+        legend.position = "right",
+        axis.text.y     = element_text(size = 7)
+      )
+  })
+  
+  output$edge_ridge_between <- renderPlot({
+    # edges where endpoints are in *different* communities
+    df <- edge_comm %>%
+      dplyr::filter(!is.na(comm_src), !is.na(comm_dst), comm_src != comm_dst)
+    
+    if (nrow(df) == 0) return(NULL)
+    
+    # long format: each edge contributes once to each incident community
+    df_long <- dplyr::bind_rows(
+      df %>%
+        dplyr::transmute(community = comm_src, partner = comm_dst, weight),
+      df %>%
+        dplyr::transmute(community = comm_dst, partner = comm_src, weight)
+    )
+    
+    # per-community summary: median between weight + n_edges
+    stats <- df_long %>%
+      dplyr::group_by(community) %>%
+      dplyr::summarise(
+        median_w = median(weight, na.rm = TRUE),
+        n_edges  = dplyr::n(),
+        .groups  = "drop"
+      ) %>%
+      dplyr::mutate(
+        community_label = paste0(community, " (n=", n_edges, ")")
+      )
+    
+    # join stats back & order communities by median between weight
+    df2 <- df_long %>%
+      dplyr::left_join(
+        stats %>% dplyr::select(community, median_w, community_label),
+        by = "community"
+      ) %>%
+      dplyr::mutate(
+        community_label = stats::reorder(community_label, median_w)
+      )
+    
+    ggplot(df2, aes(x = weight, y = community_label, fill = median_w)) +
+      ggridges::geom_density_ridges(
+        alpha          = 0.8,
+        scale          = 1.2,
+        rel_min_height = 0.01,
+        color          = "black",
+        size           = 0.25
+      ) +
+      scale_fill_viridis_c(
+        option = "C",
+        name   = "Median\nedge weight"
+      ) +
+      labs(
+        title    = "Between-community signature-level edge weights (all communities)",
+        subtitle = "Edges connecting each community to other communities",
+        x        = "Edge weight",
+        y        = "Community (ordered by median between-community weight)"
+      ) +
+      theme_minimal() +
+      theme(
+        legend.position = "right",
+        axis.text.y     = element_text(size = 7)
+      )
+  })
+  
+  output$robustness_scatter <- renderPlot({
+    # 1. Within-community stats
+    within_stats <- edge_comm %>%
+      dplyr::filter(!is.na(comm_src), !is.na(comm_dst), comm_src == comm_dst) %>%
+      dplyr::group_by(community = comm_src) %>%
+      dplyr::summarise(
+        med_within = median(weight, na.rm = TRUE),
+        n_within   = dplyr::n(),
+        .groups    = "drop"
+      )
+    
+    # 2. Between-community stats
+    between_long <- edge_comm %>%
+      dplyr::filter(!is.na(comm_src), !is.na(comm_dst), comm_src != comm_dst) %>%
+      dplyr::bind_rows(
+        # each edge contributes once for each endpoint community
+        dplyr::transmute(., community = comm_src, weight),
+        dplyr::transmute(., community = comm_dst, weight)
+      )
+    
+    between_stats <- between_long %>%
+      dplyr::group_by(community) %>%
+      dplyr::summarise(
+        med_between = median(weight, na.rm = TRUE),
+        n_between   = dplyr::n(),
+        .groups     = "drop"
+      )
+    
+    # 3. Combine + robustness score
+    stats <- dplyr::full_join(within_stats, between_stats, by = "community") %>%
+      dplyr::mutate(
+        robustness = med_within - med_between,
+        community  = as.character(community)
+      )
+    
+    # drop communities missing either side
+    stats <- stats %>%
+      dplyr::filter(!is.na(med_within), !is.na(med_between))
+    
+    if (nrow(stats) == 0) return(NULL)
+    
+    ggplot(stats, aes(x = med_within, y = med_between)) +
+      # diagonal: where within == between
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", alpha = 0.4) +
+      geom_point(
+        aes(
+          color = robustness,
+          size  = n_within
+        ),
+        alpha = 0.9
+      ) +
+      ggrepel::geom_text_repel(
+        aes(label = community),
+        size        = 3,
+        max.overlaps = 50,
+        alpha       = 0.8
+      ) +
+      scale_color_viridis_c(
+        option = "C",
+        name   = "Robustness\n(within - between)"
+      ) +
+      scale_size_continuous(
+        name = "# within edges",
+        range = c(2, 8)
+      ) +
+      labs(
+        title    = "Community robustness: within vs between edge weights",
+        subtitle = "Good communities lie below the diagonal (within > between)",
+        x        = "Median within-community edge weight",
+        y        = "Median between-community edge weight"
+      ) +
+      theme_minimal() +
+      theme(
+        legend.position = "right"
+      )
+  })
+  
+  # --- Compute per-community within and between statistics --- #
+  comm_stats <- reactive({
+    
+    req(edge_comm)
+    
+    # 1) WITHIN-community edge stats
+    within_stats <- edge_comm %>%
+      dplyr::filter(
+        !is.na(comm_src),
+        !is.na(comm_dst),
+        comm_src == comm_dst  # within
+      ) %>%
+      dplyr::group_by(community = comm_src) %>%
+      dplyr::summarise(
+        med_within = median(weight, na.rm = TRUE),
+        mean_within = mean(weight, na.rm = TRUE),
+        sd_within   = sd(weight, na.rm = TRUE),
+        n_within    = n(),
+        .groups = "drop"
+      )
+    
+    # 2) BETWEEN-community edges
+    # assign each endpoint community separately
+    between_long <- edge_comm %>%
+      dplyr::filter(
+        !is.na(comm_src),
+        !is.na(comm_dst),
+        comm_src != comm_dst
+      ) %>%
+      dplyr::bind_rows(
+        dplyr::transmute(., community = comm_src, weight),
+        dplyr::transmute(., community = comm_dst, weight)
+      )
+    
+    between_stats <- between_long %>%
+      dplyr::group_by(community) %>%
+      dplyr::summarise(
+        med_between = median(weight, na.rm = TRUE),
+        mean_between = mean(weight, na.rm = TRUE),
+        sd_between   = sd(weight, na.rm = TRUE),
+        n_between    = n(),
+        .groups = "drop"
+      )
+    
+    # 3) Combine stats
+    stats <- dplyr::full_join(within_stats, between_stats, by = "community") %>%
+      dplyr::mutate(
+        robustness = med_within - med_between,
+        community  = as.character(community)
+      ) %>%
+      dplyr::filter(!is.na(med_within), !is.na(med_between))
+    
+    stats
+  })
+  
+  output$robustness_dumbbell <- renderPlot({
+    
+    stats <- comm_stats()
+    req(nrow(stats) > 0)
+    
+    # Order by robustness
+    stats <- stats %>% arrange(desc(robustness))
+    
+    ggplot(stats, aes(y = reorder(community, robustness))) +
+      
+      # Dumbbell line
+      geom_segment(
+        aes(
+          x    = med_between,
+          xend = med_within,
+          yend = community
+        ),
+        color = "grey70",
+        size  = 1.1,
+        alpha = 0.6
+      ) +
+      
+      # Left point (between) — same color scale but faded
+      geom_point(
+        aes(x = med_between, color = robustness),
+        size = 3,
+        alpha = 0.55
+      ) +
+      
+      # Right point (within)
+      geom_point(
+        aes(x = med_within, color = robustness, size = log10(n_within + 1)),
+        alpha = 0.95
+      ) +
+      
+      scale_color_viridis_c(
+        option = "C",
+        name   = "Robustness\n(within - between)"
+      ) +
+      
+      scale_size_continuous(
+        name = "# within edges\n(log10)",
+        range = c(1, 8)
+      ) +
+      
+      labs(
+        title = "Community robustness dumbbell: within vs between edge weights",
+        subtitle = "Left = between-community median weight; Right = within-community median weight",
+        x = "Median edge weight",
+        y = "Community (ordered by robustness)"
+      ) +
+      
+      theme_minimal(base_size = 14) +
+      theme(
+        legend.position = "right",
+        panel.grid.major.y = element_blank()
+      ) + 
+      
+      ggrepel::geom_text_repel(
+        aes(
+          x = med_within,
+          label = community
+        ),
+        size = 3,
+        nudge_x = 0.02,
+        direction = "y",
+        segment.alpha = 0.1,
+        color = "black"
+      )
+    
+  })
+  
+  # ---- MoA ↔ ATC cross-ontology data (drug-level) ----
+  moa_atc_data <- reactive({
+    df <- filtered_nodes()
+    
+    # clean MoA: trim whitespace & drop unlabeled
+    df <- df %>%
+      dplyr::mutate(
+        moa_clean = trimws(moa)
+      ) %>%
+      dplyr::filter(
+        !is.na(moa_clean),
+        moa_clean != "\"\"",
+        moa_clean != "NA"        # just in case string "NA" appears
+      )
+    
+    # stop if nothing left
+    if (nrow(df) == 0) return(NULL)
+    
+    lvl <- input$atc_level  # "level1"..."level4"
+    if (!lvl %in% colnames(df)) return(NULL)
+    
+    df <- df %>%
+      dplyr::filter(!is.na(.data[[lvl]]), .data[[lvl]] != "")
+    
+    if (nrow(df) == 0) return(NULL)
+    
+    # distinct drug–MoA–ATC combos, then count drugs
+    flows <- df %>%
+      dplyr::distinct(cmap_name, moa = moa_clean, atc = .data[[lvl]]) %>%
+      dplyr::count(moa, atc, name = "n_drugs")
+    
+    # keep only reasonably supported flows
+    min_drugs <- 3
+    flows <- flows %>% dplyr::filter(n_drugs >= min_drugs)
+    if (nrow(flows) == 0) return(NULL)
+    
+    # limit to top MoAs and top ATC classes so the plot stays readable
+    top_moas <- flows %>%
+      dplyr::group_by(moa) %>%
+      dplyr::summarise(total = sum(n_drugs), .groups = "drop") %>%
+      dplyr::arrange(dplyr::desc(total)) %>%
+      dplyr::slice_head(n = 15) %>%
+      dplyr::pull(moa)
+    
+    top_atc <- flows %>%
+      dplyr::group_by(atc) %>%
+      dplyr::summarise(total = sum(n_drugs), .groups = "drop") %>%
+      dplyr::arrange(dplyr::desc(total)) %>%
+      dplyr::slice_head(n = 15) %>%
+      dplyr::pull(atc)
+    
+    flows %>%
+      dplyr::filter(moa %in% top_moas, atc %in% top_atc)
+  })
+  
+  output$moa_atc_alluvial <- renderPlot({
+    flows <- moa_atc_data()
+    req(!is.null(flows), nrow(flows) > 0)
+    
+    # human-readable label for the ATC level
+    atc_label <- switch(
+      input$atc_level,
+      "level1" = "ATC Level 1",
+      "level2" = "ATC Level 2",
+      "level3" = "ATC Level 3",
+      "level4" = "ATC Level 4",
+      input$atc_level
+    )
+    
+    ggplot(
+      flows,
+      aes(
+        axis1 = moa,
+        axis2 = atc,
+        y     = n_drugs
+      )
+    ) +
+      ggalluvial::geom_alluvium(
+        aes(fill = moa),
+        width = 1/12,
+        alpha = 0.8,
+        knot.pos = 0.4
+      ) +
+      ggalluvial::geom_stratum(
+        width = 1/6,
+        fill  = "grey95",
+        color = "grey50"
+      ) +
+      geom_text(
+        stat  = "stratum",
+        aes(label = after_stat(stratum)),
+        size  = 3
+      ) +
+      scale_x_discrete(
+        limits = c("MoA", atc_label),
+        expand = c(.1, .05)
+      ) +
+      labs(
+        title    = "MoA \u2194 ATC cross-ontology mapping",
+        subtitle = paste0(
+          "Flows weighted by # of distinct drugs; showing top MoAs and ",
+          atc_label, " classes after current filters"
+        ),
+        x = NULL,
+        y = "# Drugs"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        axis.text.y        = element_blank(),
+        axis.ticks.y       = element_blank(),
+        panel.grid.major.y = element_blank(),
+        legend.position    = "none"
+      )
+  })
+  
+  # --- Per-community MoA purity (after filters) --- #
+  moa_purity_data <- reactive({
+    df <- filtered_nodes() %>%
+      dplyr::filter(!is.na(moa), moa != "\"\"")
+    
+    if (nrow(df) == 0) return(tibble::tibble())
+    
+    # count MoAs within each community
+    by_moa <- df %>%
+      dplyr::count(community, moa, name = "n_moa")
+    
+    # total drugs with MoA per community
+    totals <- by_moa %>%
+      dplyr::group_by(community) %>%
+      dplyr::summarise(
+        n_total = sum(n_moa),
+        .groups = "drop"
+      )
+    
+    # pick the dominant MoA per community and compute purity
+    purity <- by_moa %>%
+      dplyr::group_by(community) %>%
+      dplyr::slice_max(n_moa, n = 1, with_ties = FALSE) %>%
+      dplyr::ungroup() %>%
+      dplyr::left_join(totals, by = "community") %>%
+      dplyr::mutate(
+        purity   = n_moa / n_total,
+        community = as.character(community)
+      )
+    
+    purity
+  })
+  
+  output$moa_entropy <- renderPlot({
+    stats <- moa_entropy_data()
+    if (is.null(stats) || nrow(stats) == 0) return(NULL)
+    
+    # order communities from most pure (low entropy) to most mixed (high)
+    stats <- stats %>%
+      dplyr::arrange(entropy) %>%
+      dplyr::mutate(
+        community_factor = reorder(as.character(community), entropy),
+        label = sprintf(
+          "%s (%.0f%%, n=%d)",
+          dominant_moa,
+          100 * dom_frac,
+          n_drugs
+        )
+      )
+    
+    ggplot(
+      stats,
+      aes(
+        x     = entropy,
+        y     = community_factor,
+        fill  = entropy
+      )
+    ) +
+      geom_col(alpha = 0.9) +
+      geom_text(
+        aes(label = label),
+        hjust = -0.05,
+        size  = 3
+      ) +
+      scale_x_continuous(
+        limits = c(0, 1.05),
+        breaks = seq(0, 1, by = 0.2),
+        labels = scales::number_format(accuracy = 0.1)
+      ) +
+      scale_fill_viridis_c(
+        option = "C",
+        name   = "MoA entropy\n(0 = pure, 1 = mixed)"
+      ) +
+      labs(
+        title    = "Community MoA entropy",
+        subtitle = "Entropy computed over *labeled* MoAs only (unlabeled drugs are ignored)",
+        x        = "MoA entropy",
+        y        = "Community"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        legend.position      = "right",
+        panel.grid.major.y   = element_blank(),
+        axis.text.y          = element_text(size = 7)
+      )
+  })
+  
+  
+  
+  
   
 }

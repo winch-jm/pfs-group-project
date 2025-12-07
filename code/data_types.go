@@ -11,8 +11,7 @@ type Weight = float32    // float32 is plenty for similarities/distances
 
 // Preprocessing only (computing similarities / build KNN --> discard)
 type DenseRows struct {
-    // n rows (cells) × d columns (genes or features)
-    N, D int
+    N, D int // n rows (cells) × d columns (genes or features)
     Data []float32 // row-major: row i at Data[i*D:(i+1)*D]
 }
 
@@ -99,6 +98,7 @@ type RefineBuffers struct {
     Stamp   int32
 }
 
+// Used in MaxHeap definition for Weighted KNN
 type IndexScore struct{
     similarity float32
     index int32

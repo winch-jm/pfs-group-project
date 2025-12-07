@@ -7,12 +7,15 @@ library(ggraph)
 library(plotly)
 library(tidyr)
 library(viridisLite)
+library(ggridges)
+library(ggrepel)
+library(ggalluvial)
 
 #----------------- load data & build graph (once) -----------------#
 color_palette <- function(n) Polychrome::palette36.colors(n)
 
 
-edges <- read_csv("../data/graph_edges_mcf7.csv",
+edges <- read_csv("../data/gridsearch/graph_edges_mcf7_k15.csv",
                   col_types = cols(
                     src    = col_character(),
                     dist   = col_character(),
@@ -47,7 +50,7 @@ metadata <- metadata %>%
   left_join(umap_coords,     by = "sig_id") %>%
   left_join(atc_info_unique, by = "inchi_key")
 
-partition <- readr::read_csv("../data/partition_mcf7_fewer.csv",
+partition <- readr::read_csv("../data/gridsearch/partition_mcf7_k15_g50.csv",
                              col_types = cols(
                                node      = col_character(),
                                node_id   = col_character(),
@@ -69,6 +72,8 @@ node_info <- partition %>%
     atc_class = level1,
     atc_desc  = level1_description
   )
+
+print(unique(node_info$moa))
 
 # reorder communities by size (signature-level, mostly just for consistency)
 comm_order <- node_info %>%
@@ -171,3 +176,22 @@ drug_edges <- edges %>%
 
 cat("drug-level edges:", nrow(drug_edges), "\n")
 
+
+# ---- signature-level edges annotated with community on each endpoint ----
+edge_comm <- edges %>%
+  # join community for source node
+  left_join(
+    partition %>% select(node, community),
+    by = c("src" = "node")
+  ) %>%
+  rename(comm_src = community) %>%
+  # join community for destination node
+  left_join(
+    partition %>% select(node, community),
+    by = c("dist" = "node")
+  ) %>%
+  rename(comm_dst = community) %>%
+  mutate(
+    comm_src = as.character(comm_src),
+    comm_dst = as.character(comm_dst)
+  )

@@ -100,7 +100,39 @@ ui <- fluidPage(
           plotOutput("tas_distribution", height = "250px")
         )
       ),
+      # br(),
+      # fluidRow(
+      #   column(
+      #     width = 12,
+      #     h4("Community robustness: within vs between edge weights"),
+      #     plotOutput("robustness_scatter", height = "400px")
+      #   )
+      # ),
       br(),
+      fluidRow(
+        column(
+          width=12,
+          h4("Community robustness dumbbell: within vs between edge weights"),
+          plotOutput("robustness_dumbbell", height = "600px")
+        )
+      ),
+      br(),
+      # fluidRow(
+      #   column(
+      #     width = 12,
+      #     h4("Within-community signature-level edge weights (all communities)"),
+      #     plotOutput("edge_ridge_all", height = "600px")
+      #   )
+      # ),
+      # br(),
+      # fluidRow(
+      #   column(
+      #     width = 12,
+      #     h4("Between-community signature-level edge weights (all communities)"),
+      #     plotOutput("edge_ridge_between", height = "600px")
+      #   )
+      # ),
+      
       # Row 2b: MoA vs TAS
       fluidRow(
         column(
@@ -128,6 +160,13 @@ ui <- fluidPage(
       fluidRow(
         column(
           width = 12,
+          h4("MoA \u2194 ATC cross-ontology mapping"),
+          plotOutput("moa_atc_alluvial", height = "500px")
+        )
+      ),
+      fluidRow(
+        column(
+          width = 12,
           h4(textOutput("summary_title")),
           tableOutput("community_summary"),
           
@@ -146,13 +185,20 @@ ui <- fluidPage(
           tableOutput("community_drugs")
         )
       ),
-      
+      br(),
+      fluidRow(
+        column(
+          width = 12,
+          h4("Community MoA entropy"),
+          plotOutput("moa_entropy", height = "350px")
+        )
+      ),
       br(),
       fluidRow(
         column(
           width = 12,
           h4("Mean TAS vs Community Size (drug-level)"),
-          plotOutput("tas_vs_size", height = "300px")
+          plotOutput("tas_vs_size", height = "500px")
         )
       ),
       br()

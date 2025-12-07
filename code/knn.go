@@ -7,11 +7,7 @@ import (
 )
 
 
-
-
-
 // MaxHeap is a max-heap of ints.
-
 type MaxHeap []*IndexScore
 
 func (h MaxHeap) Len() int           { return len(h) }
