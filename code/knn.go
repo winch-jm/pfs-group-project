@@ -1,8 +1,12 @@
+// Authors: Jeff Winchell, Ajay Prabhakar
+// Date: 12/09/2025
 package main
 
 import (
 	"container/heap"
    "fmt"
+   "sync"
+//    "runtime"
 	//"strconv"
 )
 
@@ -35,6 +39,7 @@ func (h *MaxHeap) Pop() any {
 func WeightedKNN(dr DenseRows, k int) *CSR{
     fmt.Printf("Running Weight KNN:\n")
     fmt.Printf("Creating Adjacency Matrix..\n")
+    // numWorkers := runtime.NumCPU()
 	adjacencyMatrix := Similarities(dr, k)
     fmt.Printf("Constructing Graph...\n")
 	return GraphCreation(adjacencyMatrix, dr)
@@ -119,17 +124,103 @@ func GraphCreation(ad [][]float32, dr DenseRows) *CSR {
         TwoM:    twoM,
     }
 }
-// func AddandCountNonZero(vals []float32, newIndices []NodeID, newData []Weight)(int, float32){
-// 	sm := 0
-// 	degree := 0.0
-// 	for x := range vals{
-// 		if vals[x] != 0{
-// 			sm ++
-// 			newIndices = append(newIndices, NodeID(x))
-// 			newData = append(newData, Weight(vals[x]))
-// 			degree = float32(degree) + vals[x]
 
-// 		}
-// 	}
-// 	return sm, degree
-// }
+// RowResult holds the top-k neighbors for a given row i
+type RowResult struct {
+    i    int
+    js   []int
+    sims []float32
+}
+
+func SimilaritiesParallel(dr DenseRows, k int, numWorkers int) [][]float32 {
+    n := dr.N
+
+    // adjacency[i][j] = similarity between i and j (0 if not among top-k)
+    adjacencyMatrix := make([][]float32, n)
+    for i := range adjacencyMatrix {
+        adjacencyMatrix[i] = make([]float32, n)
+    }
+
+    jobs := make(chan int, numWorkers)
+    results := make(chan RowResult, numWorkers)
+
+    var wg sync.WaitGroup
+
+    // Worker goroutines
+    worker := func() {
+        defer wg.Done()
+
+        for i := range jobs {
+            rowI := dr.Data[i*dr.D : (i+1)*dr.D]
+
+            scores := make([]*IndexScore, 0, n-1)
+            for j := 0; j < n; j++ {
+                if i == j {
+                    continue
+                }
+                rowJ := dr.Data[j*dr.D : (j+1)*dr.D]
+                sim := Cosine(rowI, rowJ)
+
+                scores = append(scores, &IndexScore{
+                    similarity: sim,
+                    index:      int32(j),
+                })
+            }
+
+            // Build max-heap
+            h := MaxHeap(scores)
+            heap.Init(&h)
+
+            // Extract top-k
+            js := make([]int, 0, k)
+            sims := make([]float32, 0, k)
+            for x := 0; x < k && h.Len() > 0; x++ {
+                item := heap.Pop(&h).(*IndexScore)
+                js = append(js, int(item.index))
+                sims = append(sims, item.similarity)
+            }
+
+            // Send result for row i
+            results <- RowResult{
+                i:    i,
+                js:   js,
+                sims: sims,
+            }
+        }
+    }
+
+    // Start workers
+    if numWorkers < 1 {
+        numWorkers = 1
+    }
+    wg.Add(numWorkers)
+    for w := 0; w < numWorkers; w++ {
+        go worker()
+    }
+
+    // Feed jobs
+    go func() {
+        for i := 0; i < n; i++ {
+            jobs <- i
+        }
+        close(jobs)
+    }()
+
+    // Close results once all workers are done
+    go func() {
+        wg.Wait()
+        close(results)
+    }()
+
+    // Collect results and fill adjacency matrix (safely, in one goroutine)
+    for res := range results {
+        i := res.i
+        for idx, j := range res.js {
+            sim := res.sims[idx]
+            adjacencyMatrix[i][j] = sim
+            adjacencyMatrix[j][i] = sim // keep symmetric, same behavior as before
+        }
+    }
+
+    return adjacencyMatrix
+}

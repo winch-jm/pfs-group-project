@@ -1,3 +1,5 @@
+// Authors: Jeff Winchell, Ajay Prabhakar
+// Date: 12/09/2025
 package main
 
 import (
@@ -10,14 +12,6 @@ import (
   "log"
 )
 
-
-func CountCommunities(P Partition) int {
-    seen := make(map[int32]struct{})
-    for _, c := range P {
-        seen[c] = struct{}{}
-    }
-    return len(seen)
-}
 
 func CSVToDenseRows(filename string) ([]string,DenseRows) {
 	f, err := os.Open(filename)

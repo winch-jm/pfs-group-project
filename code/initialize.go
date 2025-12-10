@@ -1,16 +1,8 @@
+// Authors: Jeff Winchell, Ajay Prabhakar
+// Date: 12/09/2025
 package main
 
-func InitializeDenseRows() DenseRows {
-	// read in csv
-	var newData DenseRows
-
-	// newData.N = 
-	// newData.D = 
-	// newData.Data = 
-
-	return newData
-}
-
+// Initialize every node to be in it's own community
 func InitializePartition(graph *CSR) Partition {
 	par := make(Partition,int(graph.N))
 	for i := int32(0); i < graph.N; i++ {
@@ -20,7 +12,10 @@ func InitializePartition(graph *CSR) Partition {
 	return par
 }
 
-// every node in it's own community
+// Initially all communities have: 
+// - no internal edges, 
+// - size 1 
+// - Tot (sum of degrees) == degree of single vertex
 func InitializeCommStats(graph *CSR) *CommStats {
 	cs := &CommStats{
 		Tot: make([]float32,graph.N),
@@ -35,6 +30,8 @@ func InitializeCommStats(graph *CSR) *CommStats {
 	return cs
 }
 
+
+// Derive Community Stats from a given Partition (list of community labels)
 func InitializeCommStatsFromPartition(g *CSR, P Partition) *CommStats{
 	var maxC int32
 	for _, c := range P {
@@ -60,6 +57,9 @@ func InitializeCommStatsFromPartition(g *CSR, P Partition) *CommStats{
 	return cs
 }
 
+// Check if CommStats arrays have enough allocated memory:
+// if yes, do nothing
+// if no, increase memory allocation
 func (cs *CommStats) EnsureCapacity(c int32) {
 	if int(c) < len(cs.Tot) {
 		return // already large enough
@@ -87,6 +87,7 @@ func (cs *CommStats) EnsureCapacity(c int32) {
 
 }
 
+// Allocate buffers for local moving (of prescribed size)
 func InitializeMoveBuffers(capGuess int) *MoveBuffers {
 	mb := &MoveBuffers{
 		CommIDs: make([]int32,0	,capGuess),
@@ -97,6 +98,7 @@ func InitializeMoveBuffers(capGuess int) *MoveBuffers {
 	return mb
 }
 
+// clear out move buffers to reuse
 func (mb *MoveBuffers) Reset() {
     mb.CommIDs = mb.CommIDs[:0]
     mb.CommWts = mb.CommWts[:0]
@@ -105,6 +107,7 @@ func (mb *MoveBuffers) Reset() {
     for k := range mb.Seen { delete(mb.Seen, k) }
 }
 
+// Add 
 func (mb *MoveBuffers) Add(commID int32, w float32) {
 	if idx, ok := mb.Seen[commID]; ok {
 		// community already seen --> accumulate weight
@@ -132,4 +135,13 @@ func (rb *RefineBuffers) Reset() {
 	rb.Queue = rb.Queue[:0]
 	rb.Stamp++ // new "epoch"
 	// Visited is left as-is; stamp logic makes old marks obsolete
+}
+
+
+func CountCommunities(P Partition) int {
+    seen := make(map[int32]struct{})
+    for _, c := range P {
+        seen[c] = struct{}{}
+    }
+    return len(seen)
 }
