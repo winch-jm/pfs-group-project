@@ -1,15 +1,12 @@
 // TOY GRAPHS FOR TESTING/DEMOS
+// Authors: Jeff Winchell, Ajay Prabhakar
+// Date: 12/09/2025
 package main
 
 
 // K_3 graph
 func DummyTriangle() *CSR {
     N := int32(3)
-
-    // adjacency:
-    // 0: 1,2
-    // 1: 0,2
-    // 2: 0,1
 
     indptr := []Idx{0, 2, 4, 6}          // len = N+1
     indices := []NodeID{1,2, 0,2, 0,1}   // neighbors concatenated
@@ -151,4 +148,32 @@ func DummyFragmented() *CSR {
     }
 
     return &CSR{N: N, Indptr: indptr, Indices: indices, Data: data, Degree: degree,TwoM:degreeSum}
+}
+
+// simple 4-node graph: two disconnected edges: (0-1), (2-3)
+func buildTwoPairGraph() *CSR {
+	adj := [][]float32{
+		{0, 1, 0, 0},
+		{1, 0, 0, 0},
+		{0, 0, 0, 1},
+		{0, 0, 1, 0},
+	}
+	dr := DenseRows{
+		N: 4,
+		D: 0,
+		// Data unused by GraphCreation, so can be nil
+	}
+	return GraphCreation(adj, dr)
+}
+
+// graph: component {0,1}, nodes 2 and 3 isolated
+func buildComponentPlusIsolatedGraph() *CSR {
+	adj := [][]float32{
+		{0, 1, 0, 0},
+		{1, 0, 0, 0},
+		{0, 0, 0, 0},
+		{0, 0, 0, 0},
+	}
+	dr := DenseRows{N: 4}
+	return GraphCreation(adj, dr)
 }
