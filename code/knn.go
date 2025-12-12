@@ -47,7 +47,6 @@ func WeightedKNN(dr DenseRows, k int) *CSR{
 
 func Similarities(dr DenseRows, k int) [][]float32 {
     n := dr.N
-
     // adjacency[i][j] = similarity between i and j (0 if not among top-k)
     adjacencyMatrix := make([][]float32, n)
     for i := range adjacencyMatrix {

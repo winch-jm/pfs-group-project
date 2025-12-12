@@ -50,3 +50,6 @@ func main(){
 	
 
 }
+
+//command line parsing for input dataset,output directory if you are doing grid_search, if you want to run algorithm once specify k and gamma
+//
