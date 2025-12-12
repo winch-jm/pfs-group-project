@@ -147,7 +147,7 @@ run_stats <- map_dfr(part_files, function(path) {
     moa_purity = moa_purity
   )
 })
-
+print(max(run_stats$modularity))
 #-----------------------------
 # Normalize modularity & build composite
 #-----------------------------
