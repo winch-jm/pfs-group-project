@@ -1,293 +1,769 @@
 package main
 
 import (
-	"container/heap"
-	"math"
+	"bufio"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
+	"container/heap"
+	//"fmt"
 )
 
-// ---------- MaxHeap tests ----------
+// ==========================
+// Helpers for float equality
+// ==========================
 
-func TestMaxHeapBasicOrdering(t *testing.T) {
-	items := []*IndexScore{
-		{similarity: 0.1, index: 0},
-		{similarity: 0.5, index: 1},
-		{similarity: 0.3, index: 2},
+const floatEps = 1e-5
+
+func floatsAlmostEqual(a, b float32) bool {
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
 	}
+	return diff <= floatEps
+}
 
-	h := MaxHeap{}
-	heap.Init(&h)
-
-	for _, it := range items {
-		heap.Push(&h, it)
+func slicesAlmostEqual(a, b []float32) bool {
+	if len(a) != len(b) {
+		return false
 	}
-
-	// After heap operations, heapIdx should match position
-	for i, it := range h {
-		if it.heapIdx != i {
-			t.Fatalf("heapIdx mismatch after push: item index=%d has heapIdx=%d, expected %d", it.index, it.heapIdx, i)
+	for i := range a {
+		if !floatsAlmostEqual(a[i], b[i]) {
+			return false
 		}
 	}
+	return true
+}
 
-	// Pop should return in descending similarity order: 0.5, 0.3, 0.1
-	expected := []float32{0.5, 0.3, 0.1}
-	for i, exp := range expected {
-		if h.Len() == 0 {
-			t.Fatalf("heap empty when expecting value %v at position %d", exp, i)
+// ==========================
+// Test case structs
+// ==========================
+
+// MaxHeap: push a bunch of items, then pop some
+type MaxHeapTest struct {
+	items          []IndexScore // initial items to push
+	numPop         int          // how many pops to perform
+	expectedIdx    []int32      // expected indices popped in order
+	expectedSim    []float32    // expected similarities popped in order
+}
+
+// Similarities: DenseRows -> adjacency matrix (top-k)
+type SimilaritiesTest struct {
+	N, D, K   int
+	data      []float32
+	expected  [][]float32
+}
+
+// GraphCreation: adjacency matrix -> CSR
+type GraphCreationTest struct {
+	N        int
+	adj      [][]float32
+	expected *CSR
+}
+
+// WeightedKNN: DenseRows + k -> CSR
+type WeightedKNNTest struct {
+	N, D, K  int
+	data     []float32
+	expected *CSR
+}
+
+// SimilaritiesParallel: DenseRows + k + numWorkers -> adjacency matrix
+type SimilaritiesParallelTest struct {
+	N, D, K      int
+	numWorkers   int
+	data         []float32
+	expected     [][]float32
+}
+
+// ==========================
+// Top-level tests
+// ==========================
+
+func TestMaxHeap(t *testing.T) {
+	tests := ReadMaxHeapTests("Tests/MaxHeap/")
+
+	for _, test := range tests {
+		// Build heap from items
+		h := &MaxHeap{}
+		for i := range test.items {
+			item := &test.items[i]
+			heap.Push(h, item)
 		}
-		val := heap.Pop(&h).(*IndexScore)
-		if math.Abs(float64(val.similarity-exp)) > 1e-6 {
-			t.Fatalf("pop %d: got similarity %v, expected %v", i, val.similarity, exp)
+		var gotIdx []int32
+		var gotSim []float32
+		for i := 0; i < test.numPop && h.Len() > 0; i++ {
+			item := heap.Pop(h).(*IndexScore)
+			gotIdx = append(gotIdx, item.index)
+			gotSim = append(gotSim, item.similarity)
 		}
-		if val.heapIdx != -1 {
-			t.Fatalf("popped item heapIdx not -1, got %d", val.heapIdx)
+
+		if len(gotIdx) != len(test.expectedIdx) ||
+			len(gotSim) != len(test.expectedSim) {
+			t.Fatalf("MaxHeap: popped lengths mismatch")
 		}
-	}
-	if h.Len() != 0 {
-		t.Fatalf("heap not empty after popping all elements, len=%d", h.Len())
+		for i := range gotIdx {
+			if gotIdx[i] != test.expectedIdx[i] {
+				t.Fatalf("MaxHeap: popped index[%d] = %d, expected %d",
+					i, gotIdx[i], test.expectedIdx[i])
+			}
+			if !floatsAlmostEqual(gotSim[i], test.expectedSim[i]) {
+				t.Fatalf("MaxHeap: popped sim[%d] = %v, expected %v",
+					i, gotSim[i], test.expectedSim[i])
+			}
+		}
 	}
 }
 
-func TestMaxHeapSwapUpdatesIndices(t *testing.T) {
-	a := &IndexScore{similarity: 0.2, index: 0, heapIdx: 0}
-	b := &IndexScore{similarity: 0.8, index: 1, heapIdx: 1}
+func TestSimilarities(t *testing.T) {
+	tests := ReadSimilaritiesTests("Tests/Similarities/")
 
-	h := MaxHeap{a, b}
-	h.Swap(0, 1)
+	for _, test := range tests {
+		dr := DenseRows{
+			N:    test.N,
+			D:    test.D,
+			Data: test.data,
+		}
 
-	if h[0] != b || h[1] != a {
-		t.Fatalf("Swap did not swap elements correctly")
-	}
-	if h[0].heapIdx != 0 || h[1].heapIdx != 1 {
-		t.Fatalf("Swap did not update heapIdx correctly: got (%d, %d), expected (0, 1)",
-			h[0].heapIdx, h[1].heapIdx)
-	}
-}
-
-func TestMaxHeapLenAndLess(t *testing.T) {
-	h := MaxHeap{
-		{similarity: 0.1, index: 0},
-		{similarity: 0.9, index: 1},
-	}
-	if h.Len() != 2 {
-		t.Fatalf("Len() = %d, expected 2", h.Len())
-	}
-	if !h.Less(1, 0) {
-		t.Fatalf("Less() should return true when similarity at i is greater than at j")
-	}
-	if h.Less(0, 1) {
-		t.Fatalf("Less() should return false when similarity at i is less than at j")
+		adj := Similarities(dr, test.K)
+		if len(adj) != len(test.expected) {
+			t.Fatalf("Similarities: row count mismatch, got %d, expected %d",
+				len(adj), len(test.expected))
+		}
+		for i := range adj {
+			if len(adj[i]) != len(test.expected[i]) {
+				t.Fatalf("Similarities: col count mismatch in row %d, got %d, expected %d",
+					i, len(adj[i]), len(test.expected[i]))
+			}
+			for j := range adj[i] {
+				if !floatsAlmostEqual(adj[i][j], test.expected[i][j]) {
+					t.Fatalf("Similarities: adj[%d][%d] = %v, expected %v",
+						i, j, adj[i][j], test.expected[i][j])
+				}
+			}
+		}
 	}
 }
 
-// ---------- Helpers for DenseRows / float comparison ----------
+func TestGraphCreation(t *testing.T) {
+	tests := ReadGraphCreationTests("Tests/GraphCreation/")
 
-func float32AlmostEqual(a, b, eps float32) bool {
-	return math.Abs(float64(a)-float64(b)) <= float64(eps)
+	for _, test := range tests {
+		// DenseRows only used for N in GraphCreation; D/Data are irrelevant.
+		dr := DenseRows{N: test.N, D: 0, Data: nil}
+		csr := GraphCreation(test.adj, dr)
+
+		exp := test.expected
+
+		if int(csr.N) != test.N {
+			t.Fatalf("GraphCreation: N = %d, expected %d", csr.N, test.N)
+		}
+		if len(csr.Indptr) != len(exp.Indptr) ||
+			len(csr.Indices) != len(exp.Indices) ||
+			len(csr.Data) != len(exp.Data) ||
+			len(csr.Degree) != len(exp.Degree) {
+			t.Fatalf("GraphCreation: length mismatch in CSR arrays")
+		}
+
+		for i := range csr.Indptr {
+			if int(csr.Indptr[i]) != int(exp.Indptr[i]) {
+				t.Fatalf("GraphCreation: Indptr[%d] = %d, expected %d",
+					i, csr.Indptr[i], exp.Indptr[i])
+			}
+		}
+		for i := range csr.Indices {
+			if int(csr.Indices[i]) != int(exp.Indices[i]) {
+				t.Fatalf("GraphCreation: Indices[%d] = %d, expected %d",
+					i, csr.Indices[i], exp.Indices[i])
+			}
+		}
+		if !slicesAlmostEqual(csr.Data, exp.Data) {
+			t.Fatalf("GraphCreation: Data mismatch")
+		}
+		if !slicesAlmostEqual(csr.Degree, exp.Degree) {
+			t.Fatalf("GraphCreation: Degree mismatch")
+		}
+		if !floatsAlmostEqual(csr.TwoM, exp.TwoM) {
+			t.Fatalf("GraphCreation: TwoM = %v, expected %v",
+				csr.TwoM, exp.TwoM)
+		}
+	}
 }
 
-// ---------- Similarities tests ----------
+func TestWeightedKNN(t *testing.T) {
+	tests := ReadWeightedKNNTests("Tests/WeightedKNN/")
 
-func TestSimilaritiesTopK(t *testing.T) {
-	// Simple 3-point dataset in 2D:
-	// v0 = [1, 0]
-	// v1 = [1, 0]  (identical to v0)
-	// v2 = [0, 1]  (orthogonal)
-	//
-	// cos(v0, v1) = 1
-	// cos(v0, v2) = 0
-	// cos(v1, v2) = 0
-	//
-	// With k=1, for i=0, the top neighbor should be j=1 with similarity 1.
-	dr := DenseRows{
-		N: 3,
-		D: 2,
-		Data: []float32{
-			1, 0, // v0
-			1, 0, // v1
-			0, 1, // v2
-		},
+	for _, test := range tests {
+		dr := DenseRows{
+			N:    test.N,
+			D:    test.D,
+			Data: test.data,
+		}
+
+		csr := WeightedKNN(dr, test.K)
+		exp := test.expected
+
+		if int(csr.N) != test.N {
+			t.Fatalf("WeightedKNN: N = %d, expected %d", csr.N, test.N)
+		}
+		if len(csr.Indptr) != len(exp.Indptr) ||
+			len(csr.Indices) != len(exp.Indices) ||
+			len(csr.Data) != len(exp.Data) ||
+			len(csr.Degree) != len(exp.Degree) {
+			t.Fatalf("WeightedKNN: length mismatch in CSR arrays")
+		}
+
+		for i := range csr.Indptr {
+			if int(csr.Indptr[i]) != int(exp.Indptr[i]) {
+				t.Fatalf("WeightedKNN: Indptr[%d] = %d, expected %d",
+					i, csr.Indptr[i], exp.Indptr[i])
+			}
+		}
+		for i := range csr.Indices {
+			if int(csr.Indices[i]) != int(exp.Indices[i]) {
+				t.Fatalf("WeightedKNN: Indices[%d] = %d, expected %d",
+					i, csr.Indices[i], exp.Indices[i])
+			}
+		}
+		if !slicesAlmostEqual(csr.Data, exp.Data) {
+			t.Fatalf("WeightedKNN: Data mismatch")
+		}
+		if !slicesAlmostEqual(csr.Degree, exp.Degree) {
+			t.Fatalf("WeightedKNN: Degree mismatch")
+		}
+		if !floatsAlmostEqual(csr.TwoM, exp.TwoM) {
+			t.Fatalf("WeightedKNN: TwoM = %v, expected %v",
+				csr.TwoM, exp.TwoM)
+		}
+	}
+}
+
+func TestSimilaritiesParallel(t *testing.T) {
+	tests := ReadSimilaritiesParallelTests("Tests/SimilaritiesParallel/")
+
+	for _, test := range tests {
+		dr := DenseRows{
+			N:    test.N,
+			D:    test.D,
+			Data: test.data,
+		}
+
+		adj := SimilaritiesParallel(dr, test.K, test.numWorkers)
+
+		if len(adj) != len(test.expected) {
+			t.Fatalf("SimilaritiesParallel: row count mismatch, got %d, expected %d",
+				len(adj), len(test.expected))
+		}
+		for i := range adj {
+			if len(adj[i]) != len(test.expected[i]) {
+				t.Fatalf("SimilaritiesParallel: col count mismatch in row %d, got %d, expected %d",
+					i, len(adj[i]), len(test.expected[i]))
+			}
+			for j := range adj[i] {
+				if !floatsAlmostEqual(adj[i][j], test.expected[i][j]) {
+					t.Fatalf("SimilaritiesParallel: adj[%d][%d] = %v, expected %v",
+						i, j, adj[i][j], test.expected[i][j])
+				}
+			}
+		}
+	}
+}
+
+// ==========================
+// Readers for test cases
+// ==========================
+
+// Assumes a helper:
+// func ReadDirectory(dir string) []os.DirEntry
+// already exists in your project (like the N-body harness).
+
+// -------- MaxHeap --------
+//
+// Input format (Tests/MaxHeap/input/*.txt):
+//   line 1: nItems
+//   next nItems lines: "<index> <similarity>"
+//   next line: nPop
+//
+// Output format:
+//   line 1: indices popped (space-separated int32)
+//   line 2: similarities popped (space-separated float32)
+func ReadMaxHeapTests(dir string) []MaxHeapTest {
+	inputFiles := ReadDirectory(dir + "/input")
+	tests := make([]MaxHeapTest, len(inputFiles))
+
+	for i, f := range inputFiles {
+		items, pops := readMaxHeapInput(dir + "input/" + f.Name())
+		tests[i].items = items
+		tests[i].numPop = pops
 	}
 
-	k := 1
-	adj := Similarities(dr, k)
-
-	if len(adj) != 3 {
-		t.Fatalf("adjacency matrix has wrong number of rows: got %d, expected 3", len(adj))
+	outputFiles := ReadDirectory(dir + "/output")
+	if len(outputFiles) != len(inputFiles) {
+		panic("ReadMaxHeapTests: input/output count mismatch")
 	}
-	for i := range adj {
-		if len(adj[i]) != 3 {
-			t.Fatalf("adj[%d] has wrong length: got %d, expected 3", i, len(adj[i]))
+	for i, f := range outputFiles {
+		idxs, sims := readMaxHeapOutput(dir + "output/" + f.Name())
+		tests[i].expectedIdx = idxs
+		tests[i].expectedSim = sims
+	}
+	return tests
+}
+
+func readMaxHeapInput(file string) ([]IndexScore, int) {
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+
+	// nItems
+	if !sc.Scan() {
+		panic("readMaxHeapInput: missing nItems")
+	}
+	nItems, _ := strconv.Atoi(strings.TrimSpace(sc.Text()))
+
+	items := make([]IndexScore, 0, nItems)
+
+	for i := 0; i < nItems; i++ {
+		if !sc.Scan() {
+			panic("readMaxHeapInput: missing item line")
+		}
+		line := strings.TrimSpace(sc.Text())
+		parts := strings.Split(line, " ")
+		if len(parts) != 2 {
+			panic("readMaxHeapInput: item line must be '<index> <similarity>'")
+		}
+		idx64, err := strconv.ParseInt(parts[0], 10, 32)
+		if err != nil {
+			panic(err)
+		}
+		sim64, err := strconv.ParseFloat(parts[1], 32)
+		if err != nil {
+			panic(err)
+		}
+		items = append(items, IndexScore{
+			index:      int32(idx64),
+			similarity: float32(sim64),
+			heapIdx:    -1,
+		})
+	}
+
+	// nPop
+	if !sc.Scan() {
+		panic("readMaxHeapInput: missing nPop")
+	}
+	nPop, _ := strconv.Atoi(strings.TrimSpace(sc.Text()))
+
+	return items, nPop
+}
+
+func readMaxHeapOutput(file string) ([]int32, []float32) {
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+
+	if !sc.Scan() {
+		panic("readMaxHeapOutput: missing indices line")
+	}
+	idxLine := strings.TrimSpace(sc.Text())
+	idxParts := splitNonEmpty(idxLine)
+	idxs := make([]int32, len(idxParts))
+	for i, p := range idxParts {
+		v, err := strconv.ParseInt(p, 10, 32)
+		if err != nil {
+			panic(err)
+		}
+		idxs[i] = int32(v)
+	}
+
+	if !sc.Scan() {
+		panic("readMaxHeapOutput: missing similarities line")
+	}
+	simLine := strings.TrimSpace(sc.Text())
+	simParts := splitNonEmpty(simLine)
+	sims := make([]float32, len(simParts))
+	for i, p := range simParts {
+		v, err := strconv.ParseFloat(p, 32)
+		if err != nil {
+			panic(err)
+		}
+		sims[i] = float32(v)
+	}
+	return idxs, sims
+}
+
+// -------- Similarities --------
+//
+// Input (Tests/Similarities/input/*.txt):
+//   line 1: N D K
+//   next N lines: D floats each (row of data)
+//
+// Output (Tests/Similarities/output/*.txt):
+//   N lines: N floats each (adjacency matrix)
+func ReadSimilaritiesTests(dir string) []SimilaritiesTest {
+	inputFiles := ReadDirectory(dir + "/input")
+	tests := make([]SimilaritiesTest, len(inputFiles))
+
+	for i, f := range inputFiles {
+		N, D, K, data := readDenseRowsWithK(dir + "input/" + f.Name())
+		tests[i].N = N
+		tests[i].D = D
+		tests[i].K = K
+		tests[i].data = data
+	}
+
+	outputFiles := ReadDirectory(dir + "/output")
+	if len(outputFiles) != len(inputFiles) {
+		panic("ReadSimilaritiesTests: input/output count mismatch")
+	}
+	for i, f := range outputFiles {
+		tests[i].expected = readMatrix(dir + "output/" + f.Name())
+	}
+	return tests
+}
+
+// -------- GraphCreation --------
+//
+// Input (Tests/GraphCreation/input/*.txt):
+//   line 1: N
+//   next N lines: N floats (adjacency matrix)
+//
+// Output (Tests/GraphCreation/output/*.txt):
+//   line 1: Indptr (space-separated ints)
+//   line 2: Indices (space-separated ints)
+//   line 3: Data   (space-separated floats)
+//   line 4: Degree (space-separated floats)
+//   line 5: TwoM   (single float)
+func ReadGraphCreationTests(dir string) []GraphCreationTest {
+	inputFiles := ReadDirectory(dir + "/input")
+	tests := make([]GraphCreationTest, len(inputFiles))
+
+	for i, f := range inputFiles {
+		N, adj := readGraphCreationInput(dir + "input/" + f.Name())
+		tests[i].N = N
+		tests[i].adj = adj
+	}
+
+	outputFiles := ReadDirectory(dir + "/output")
+	if len(outputFiles) != len(inputFiles) {
+		panic("ReadGraphCreationTests: input/output count mismatch")
+	}
+	for i, f := range outputFiles {
+		tests[i].expected = readCSRFromFile(dir + "output/" + f.Name())
+	}
+	return tests
+}
+
+// -------- WeightedKNN --------
+//
+// Input (Tests/WeightedKNN/input/*.txt):
+//   line 1: N D K
+//   next N lines: D floats each
+//
+// Output (Tests/WeightedKNN/output/*.txt):
+//   same 5-line CSR format as GraphCreation
+func ReadWeightedKNNTests(dir string) []WeightedKNNTest {
+	inputFiles := ReadDirectory(dir + "/input")
+	tests := make([]WeightedKNNTest, len(inputFiles))
+
+	for i, f := range inputFiles {
+		N, D, K, data := readDenseRowsWithK(dir + "input/" + f.Name())
+		tests[i].N = N
+		tests[i].D = D
+		tests[i].K = K
+		tests[i].data = data
+	}
+
+	outputFiles := ReadDirectory(dir + "/output")
+	if len(outputFiles) != len(inputFiles) {
+		panic("ReadWeightedKNNTests: input/output count mismatch")
+	}
+	for i, f := range outputFiles {
+		tests[i].expected = readCSRFromFile(dir + "output/" + f.Name())
+	}
+	return tests
+}
+
+// -------- SimilaritiesParallel --------
+//
+// Input (Tests/SimilaritiesParallel/input/*.txt):
+//   line 1: N D K numWorkers
+//   next N lines: D floats each
+//
+// Output (Tests/SimilaritiesParallel/output/*.txt):
+//   N lines: N floats each (adjacency matrix)
+func ReadSimilaritiesParallelTests(dir string) []SimilaritiesParallelTest {
+	inputFiles := ReadDirectory(dir + "/input")
+	tests := make([]SimilaritiesParallelTest, len(inputFiles))
+
+	for i, f := range inputFiles {
+		N, D, K, numWorkers, data := readDenseRowsWithKAndWorkers(dir + "input/" + f.Name())
+		tests[i].N = N
+		tests[i].D = D
+		tests[i].K = K
+		tests[i].numWorkers = numWorkers
+		tests[i].data = data
+	}
+
+	outputFiles := ReadDirectory(dir + "/output")
+	if len(outputFiles) != len(inputFiles) {
+		panic("ReadSimilaritiesParallelTests: input/output count mismatch")
+	}
+	for i, f := range outputFiles {
+		tests[i].expected = readMatrix(dir + "output/" + f.Name())
+	}
+	return tests
+}
+
+// ==========================
+// Low-level read helpers
+// ==========================
+
+func splitNonEmpty(line string) []string {
+	if line == "" {
+		return []string{}
+	}
+	parts := strings.Fields(line)
+	return parts
+}
+
+func readDenseRowsWithK(file string) (int, int, int, []float32) {
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+
+	// N D K
+	if !sc.Scan() {
+		panic("readDenseRowsWithK: missing N D K line")
+	}
+	header := splitNonEmpty(strings.TrimSpace(sc.Text()))
+	if len(header) != 3 {
+		panic("readDenseRowsWithK: N D K line must have 3 ints")
+	}
+	N, _ := strconv.Atoi(header[0])
+	D, _ := strconv.Atoi(header[1])
+	K, _ := strconv.Atoi(header[2])
+
+	data := make([]float32, 0, N*D)
+	for i := 0; i < N; i++ {
+		if !sc.Scan() {
+			panic("readDenseRowsWithK: missing row line")
+		}
+		line := strings.TrimSpace(sc.Text())
+		parts := splitNonEmpty(line)
+		if len(parts) != D {
+			panic("readDenseRowsWithK: row length != D")
+		}
+		for _, p := range parts {
+			v, err := strconv.ParseFloat(p, 32)
+			if err != nil {
+				panic(err)
+			}
+			data = append(data, float32(v))
 		}
 	}
 
-	// Check that v0 and v1 are connected with similarity ~1
-	if !float32AlmostEqual(adj[0][1], 1.0, 1e-6) {
-		t.Fatalf("adj[0][1] = %v, expected ~1", adj[0][1])
-	}
-	if !float32AlmostEqual(adj[1][0], 1.0, 1e-6) {
-		t.Fatalf("adj[1][0] = %v, expected ~1", adj[1][0])
-	}
-
-	// v0 and v2 should not be in top-1 neighbors for each other, so should be 0
-	if !float32AlmostEqual(adj[0][2], 0.0, 1e-6) {
-		t.Fatalf("adj[0][2] = %v, expected 0", adj[0][2])
-	}
-	if !float32AlmostEqual(adj[2][0], 0.0, 1e-6) {
-		t.Fatalf("adj[2][0] = %v, expected 0", adj[2][0])
-	}
+	return N, D, K, data
 }
 
-// Also confirm k > (n-1) is handled gracefully.
-func TestSimilaritiesLargeK(t *testing.T) {
-	dr := DenseRows{
-		N: 2,
-		D: 2,
-		Data: []float32{
-			1, 0,
-			1, 0,
-		},
+func readDenseRowsWithKAndWorkers(file string) (int, int, int, int, []float32) {
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
 	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
 
-	adj := Similarities(dr, 10) // larger than n-1
-	if len(adj) != 2 || len(adj[0]) != 2 || len(adj[1]) != 2 {
-		t.Fatalf("adjacency matrix dimensions incorrect for large k")
+	// N D K numWorkers
+	if !sc.Scan() {
+		panic("readDenseRowsWithKAndWorkers: missing header line")
 	}
+	header := splitNonEmpty(strings.TrimSpace(sc.Text()))
+	if len(header) != 4 {
+		panic("readDenseRowsWithKAndWorkers: header must have 4 ints")
+	}
+	N, _ := strconv.Atoi(header[0])
+	D, _ := strconv.Atoi(header[1])
+	K, _ := strconv.Atoi(header[2])
+	numWorkers, _ := strconv.Atoi(header[3])
 
-	// Only one pair of distinct nodes, they should have similarity 1 in both directions
-	if !float32AlmostEqual(adj[0][1], 1.0, 1e-6) || !float32AlmostEqual(adj[1][0], 1.0, 1e-6) {
-		t.Fatalf("unexpected similarities for large k: adj[0][1]=%v, adj[1][0]=%v",
-			adj[0][1], adj[1][0])
+	data := make([]float32, 0, N*D)
+	for i := 0; i < N; i++ {
+		if !sc.Scan() {
+			panic("readDenseRowsWithKAndWorkers: missing row line")
+		}
+		line := strings.TrimSpace(sc.Text())
+		parts := splitNonEmpty(line)
+		if len(parts) != D {
+			panic("readDenseRowsWithKAndWorkers: row length != D")
+		}
+		for _, p := range parts {
+			v, err := strconv.ParseFloat(p, 32)
+			if err != nil {
+				panic(err)
+			}
+			data = append(data, float32(v))
+		}
 	}
+	return N, D, K, numWorkers, data
 }
 
-// ---------- GraphCreation tests ----------
+func readMatrix(file string) [][]float32 {
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
 
-func TestGraphCreationFromAdjacency(t *testing.T) {
-	// Use the same adjacency as in TestSimilaritiesTopK for a 3-node graph.
-	dr := DenseRows{
-		N: 3,
-		D: 2,
-		Data: []float32{
-			1, 0,
-			1, 0,
-			0, 1,
-		},
+	var rows [][]float32
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		parts := splitNonEmpty(line)
+		row := make([]float32, len(parts))
+		for i, p := range parts {
+			v, err := strconv.ParseFloat(p, 32)
+			if err != nil {
+				panic(err)
+			}
+			row[i] = float32(v)
+		}
+		rows = append(rows, row)
 	}
-	adj := Similarities(dr, 1)
-
-	csr := GraphCreation(adj, dr)
-	if csr == nil {
-		t.Fatalf("GraphCreation returned nil CSR")
+	if err := sc.Err(); err != nil {
+		panic(err)
 	}
-
-	if csr.N != int32(dr.N) {
-		t.Fatalf("CSR.N = %d, expected %d", csr.N, dr.N)
-	}
-	if len(csr.Indptr) != dr.N+1 {
-		t.Fatalf("CSR.Indptr length = %d, expected %d", len(csr.Indptr), dr.N+1)
-	}
-
-	// Expected: two directed edges: 0->1 and 1->0 (other weights zero)
-	// So total edges = 2
-	if len(csr.Indices) != 2 {
-		t.Fatalf("CSR.Indices length = %d, expected 2", len(csr.Indices))
-	}
-	if len(csr.Data) != 2 {
-		t.Fatalf("CSR.Data length = %d, expected 2", len(csr.Data))
-	}
-
-	// Degrees: node 0 -> 1, node 1 -> 1, node 2 -> 0
-	if len(csr.Degree) != dr.N {
-		t.Fatalf("CSR.Degree length = %d, expected %d", len(csr.Degree), dr.N)
-	}
-	if !float32AlmostEqual(csr.Degree[0], 1.0, 1e-6) ||
-		!float32AlmostEqual(csr.Degree[1], 1.0, 1e-6) ||
-		!float32AlmostEqual(csr.Degree[2], 0.0, 1e-6) {
-		t.Fatalf("CSR.Degree = %v, expected [1, 1, 0]", csr.Degree)
-	}
-
-	// TwoM should be sum of degrees
-	if !float32AlmostEqual(csr.TwoM, csr.Degree[0]+csr.Degree[1]+csr.Degree[2], 1e-6) {
-		t.Fatalf("CSR.TwoM = %v, expected %v", csr.TwoM,
-			csr.Degree[0]+csr.Degree[1]+csr.Degree[2])
-	}
+	return rows
 }
 
-// ---------- WeightedKNN tests ----------
+func readGraphCreationInput(file string) (int, [][]float32) {
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
 
-func TestWeightedKNNConsistency(t *testing.T) {
-	// Small 3-point example again
-	dr := DenseRows{
-		N: 3,
-		D: 2,
-		Data: []float32{
-			1, 0,
-			1, 0,
-			0, 1,
-		},
+	if !sc.Scan() {
+		panic("readGraphCreationInput: missing N")
 	}
-	k := 1
+	N, _ := strconv.Atoi(strings.TrimSpace(sc.Text()))
 
-	// Direct computation
-	adj := Similarities(dr, k)
-	expectedCSR := GraphCreation(adj, dr)
-
-	// Via WeightedKNN
-	gotCSR := WeightedKNN(dr, k)
-
-	if gotCSR == nil {
-		t.Fatalf("WeightedKNN returned nil CSR")
-	}
-
-	// Check basic fields match
-	if gotCSR.N != expectedCSR.N {
-		t.Fatalf("WeightedKNN N = %d, expected %d", gotCSR.N, expectedCSR.N)
-	}
-	if len(gotCSR.Indptr) != len(expectedCSR.Indptr) {
-		t.Fatalf("WeightedKNN Indptr length = %d, expected %d",
-			len(gotCSR.Indptr), len(expectedCSR.Indptr))
-	}
-	if len(gotCSR.Indices) != len(expectedCSR.Indices) {
-		t.Fatalf("WeightedKNN Indices length = %d, expected %d",
-			len(gotCSR.Indices), len(expectedCSR.Indices))
-	}
-	if len(gotCSR.Data) != len(expectedCSR.Data) {
-		t.Fatalf("WeightedKNN Data length = %d, expected %d",
-			len(gotCSR.Data), len(expectedCSR.Data))
-	}
-	if len(gotCSR.Degree) != len(expectedCSR.Degree) {
-		t.Fatalf("WeightedKNN Degree length = %d, expected %d",
-			len(gotCSR.Degree), len(expectedCSR.Degree))
-	}
-
-	// Compare contents (convert indices to int for comparison so we don't care about underlying type)
-	for i := range gotCSR.Indptr {
-		if int(gotCSR.Indptr[i]) != int(expectedCSR.Indptr[i]) {
-			t.Fatalf("Indptr[%d] mismatch: got %d, expected %d",
-				i, int(gotCSR.Indptr[i]), int(expectedCSR.Indptr[i]))
+	rows := make([][]float32, 0, N)
+	for i := 0; i < N; i++ {
+		if !sc.Scan() {
+			panic("readGraphCreationInput: missing row")
 		}
-	}
-	for i := range gotCSR.Indices {
-		if int(gotCSR.Indices[i]) != int(expectedCSR.Indices[i]) {
-			t.Fatalf("Indices[%d] mismatch: got %d, expected %d",
-				i, int(gotCSR.Indices[i]), int(expectedCSR.Indices[i]))
+		line := strings.TrimSpace(sc.Text())
+		parts := splitNonEmpty(line)
+		row := make([]float32, len(parts))
+		for j, p := range parts {
+			v, err := strconv.ParseFloat(p, 32)
+			if err != nil {
+				panic(err)
+			}
+			row[j] = float32(v)
 		}
+		rows = append(rows, row)
 	}
-	for i := range gotCSR.Data {
-		if !float32AlmostEqual(gotCSR.Data[i], expectedCSR.Data[i], 1e-6) {
-			t.Fatalf("Data[%d] mismatch: got %v, expected %v",
-				i, gotCSR.Data[i], expectedCSR.Data[i])
-		}
+	return N, rows
+}
+
+func readCSRFromFile(file string) *CSR {
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
 	}
-	for i := range gotCSR.Degree {
-		if !float32AlmostEqual(gotCSR.Degree[i], expectedCSR.Degree[i], 1e-6) {
-			t.Fatalf("Degree[%d] mismatch: got %v, expected %v",
-				i, gotCSR.Degree[i], expectedCSR.Degree[i])
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+
+	// line 1: Indptr (ints)
+	if !sc.Scan() {
+		panic("readCSRFromFile: missing Indptr")
+	}
+	indptrLine := strings.TrimSpace(sc.Text())
+	indptrParts := splitNonEmpty(indptrLine)
+	indptr := make([]Idx, len(indptrParts))
+	for i, p := range indptrParts {
+		v, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			panic(err)
 		}
+		indptr[i] = Idx(v)
 	}
 
-	if !float32AlmostEqual(gotCSR.TwoM, expectedCSR.TwoM, 1e-6) {
-		t.Fatalf("TwoM mismatch: got %v, expected %v", gotCSR.TwoM, expectedCSR.TwoM)
+	// line 2: Indices (ints)
+	if !sc.Scan() {
+		panic("readCSRFromFile: missing Indices")
+	}
+	indicesLine := strings.TrimSpace(sc.Text())
+	indicesParts := splitNonEmpty(indicesLine)
+	indices := make([]NodeID, len(indicesParts))
+	for i, p := range indicesParts {
+		v, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		indices[i] = NodeID(v)
+	}
+
+	// line 3: Data (floats)
+	if !sc.Scan() {
+		panic("readCSRFromFile: missing Data")
+	}
+	dataLine := strings.TrimSpace(sc.Text())
+	dataParts := splitNonEmpty(dataLine)
+	data := make([]Weight, len(dataParts))
+	for i, p := range dataParts {
+		v, err := strconv.ParseFloat(p, 32)
+		if err != nil {
+			panic(err)
+		}
+		data[i] = Weight(v)
+	}
+
+	// line 4: Degree (floats)
+	if !sc.Scan() {
+		panic("readCSRFromFile: missing Degree")
+	}
+	degLine := strings.TrimSpace(sc.Text())
+	degParts := splitNonEmpty(degLine)
+	degree := make([]float32, len(degParts))
+	for i, p := range degParts {
+		v, err := strconv.ParseFloat(p, 32)
+		if err != nil {
+			panic(err)
+		}
+		degree[i] = float32(v)
+	}
+
+	// line 5: TwoM (float)
+	if !sc.Scan() {
+		panic("readCSRFromFile: missing TwoM")
+	}
+	twoMLine := strings.TrimSpace(sc.Text())
+	twoMVal, err := strconv.ParseFloat(twoMLine, 32)
+	if err != nil {
+		panic(err)
+	}
+
+	return &CSR{
+		N:       int32(len(degree)),
+		Indptr:  indptr,
+		Indices: indices,
+		Data:    data,
+		Degree:  degree,
+		TwoM:    float32(twoMVal),
 	}
 }
