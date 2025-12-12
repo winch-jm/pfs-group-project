@@ -72,3 +72,14 @@ _Add screenshots or GIFs of the dashboard here if desired._
 ├── data       <- lincs l1000 subset
 └── notebooks  <- python notebooks used to preprocess data
 ```
+## **How To Run**
+```
+./code dataset prefix outputDir gridSearch k(optional) gamma(optional)
+
+```
+- dataset:  input dataset in .csv format
+- prefix: tag you want for graphs and images
+- outputDir: filepath that the algorithm results go to
+- gridSearch: true or false, if user wants to find optimal hyperparameters
+- k: neighbors in initial graph
+- gamma: float hyperparameter
