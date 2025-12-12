@@ -268,7 +268,7 @@ func Aggregation(graph *CSR, partitionGraph Partition, aggregationMap AggMap) *C
     }
 
 
-    // --- 1. Get number of communities C from partitionGraph ---
+    // Get number of communities C from partitionGraph
     maxComm := int32(0)
     for _, cid := range partitionGraph {
         if cid > maxComm {
@@ -276,17 +276,13 @@ func Aggregation(graph *CSR, partitionGraph Partition, aggregationMap AggMap) *C
         }
     }
 
-    newN := int(maxComm) + 1 // communities are 0..C-1
-    // nodeToComm[i] is just partitionGraph[i]
+    newN := int(maxComm) + 1 
     nodeToComm := partitionGraph
-
-    // --- 2. Aggregate edge weights between communities ---
     type edgeKey struct {
         u, v int32
 		w float32
     }
 
-	//defines edges between two different communities
     edgeWeights := make(map[edgeKey]Weight)
 
     for u := 0; u < N; u++ {
@@ -310,9 +306,7 @@ func Aggregation(graph *CSR, partitionGraph Partition, aggregationMap AggMap) *C
         }
     }
 
-    // --- 3. Convert aggregated map into adjacency lists ---
-	//Fix this
-	// fmt.Println(edgeWeights)
+    // Convert aggregated map into adjacency lists
     adj := make([][]edgeKey, newN)
 
     for k, w := range edgeWeights {
@@ -326,9 +320,8 @@ func Aggregation(graph *CSR, partitionGraph Partition, aggregationMap AggMap) *C
             adj[cv] = append(adj[cv], edgeKey{u: cv, v: cu, w: w})
         }
     }
-	// fmt.Println(adj)
-	// fmt.Println(newN)
-    // --- 4. Build CSR arrays for new graph ---
+
+    // Build CSR arrays for new graph 
     newIndptr := make([]Idx, newN+1)
     totalEdges := 0
     for i := 0; i < newN; i++ {
@@ -348,8 +341,7 @@ func Aggregation(graph *CSR, partitionGraph Partition, aggregationMap AggMap) *C
             pos++
         }
     }
-
-    // --- 5. Degrees for each super-node ---
+	//Creates the new CSR based on the properties of the newly created nodes
     newDegree := make([]float32, newN)
 	var twoM float32 
     for i := 0; i < newN; i++ {
