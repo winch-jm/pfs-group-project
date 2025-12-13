@@ -59,10 +59,8 @@ Key capabilities:
 
 - **Optimization utilities**
   - Visualize how clustering quality varies across γ  
-  - Aid in selecting resolution parameters  
-
-_Add screenshots or GIFs of the dashboard here if desired._
-
+  - Aid in selecting resolution parameters
+  - 
 ---
 
 ## 📁 **Repository Structure**
