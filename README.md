@@ -11,8 +11,7 @@ Group members:
 2. [Ajay Prabhakar](https://github.com/ajayprab20/)
 3. [Nethan Ramachandran](https://github.com/nethanr/)
 
-[Link to Data](https://drive.google.com/drive/u/0/folders/1Ge4OSOuxCWXZXDOTZMt1taMk5nvEdpj9)
----
+[Link to **Video Demo**](https://youtu.be/lMc7Q9WJBLk)
 
 ## 🚀 **Features**
 
@@ -54,33 +53,46 @@ Key capabilities:
   - Provides interpretable summaries and visualizations  
 
 - **Multiple quality functions**  
-  - Compare Leiden vs Louvain  
+  - Compare Reichardt Bornholdt Potts Model (RBPM) vs vanilla modularity
   - Explore different resolution (γ) settings  
 
 - **Optimization utilities**
   - Visualize how clustering quality varies across γ  
-  - Aid in selecting resolution parameters
-  - 
+  - Aid in selecting resolution parameters  
+
+
 ---
 
 ## 📁 **Repository Structure**
 ```
 ├── code       <- go code
 ├── dashboard  <- rshiny dashboard
-├── data       <- lincs l1000 subset
-└── notebooks  <- python notebooks used to preprocess data
+├── data       <- put your data here
+└── notebooks  <- python notebook used to preprocess data
 ```
-## **How To Run**
-1. Download mcf7_subset_pca.csv file and place in /data sub-directory in folder
-2. Run command listed below:
+## **How To Run Go Code**
 ```
-./code dataset prefix outputDir gridSearch k(optional) gamma(optional)
+cd leiden
 
+go build  
+
+./leiden dataset prefix outputDir/ gridSearch k(optional) gamma(optional)
 ```
-- dataset:  input dataset in .csv format
-- prefix: tag you want for graphs and images
-- outputDir: filepath that the algorithm results go to
-- gridSearch: true or false, if user wants to find optimal hyperparameters
-- k: neighbors in initial graph
-- gamma: float hyperparameter
-Dow
+- `dataset`:  input dataset in .csv format (use `data/mcf7_subset_pca.csv`)
+- `prefix`: tag you want for graphs and images
+- `outputDir`: filepath that the algorithm results go to
+- `gridSearch`: true or false, if user wants to find optimal hyperparameters
+- `k`: # of nearest neighbors for KNN
+- `gamma`: resolution hyperparameter of Leiden algorithm
+
+
+## **How To Run R Shiny Dashboard**
+
+In R terminal:
+```
+setwd("<projectdir>/dashboard/")
+
+install.packages('renv'); renv::restore() 
+
+shiny::runApp("<projectdir>/dashboard")
+```
