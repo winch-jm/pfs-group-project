@@ -11,11 +11,22 @@ library(ggridges)
 library(ggrepel)
 library(ggalluvial)
 
+#------------------------- data paths -----------------------------#
+
+graphEdgeFile   <- "../test/gridsearch/pfsDemo_graph_edges_k15.csv"
+partitionFile   <- "../test/gridsearch/pfsDemo_partition_k15_g50.csv"
+sigInfoFile     <- "../data/siginfo_beta.txt"
+cpInfoFile      <- "../data/compoundinfo_beta.txt"
+atcInfoFile     <- "../data/drug2atc.csv"
+umapCoordsFile  <- "../data/MCF7_umap.csv"
+
+
+
 #----------------- load data & build graph (once) -----------------#
 color_palette <- function(n) Polychrome::palette36.colors(n)
 
 
-edges <- read_csv("../data/gridsearch/graph_edges_mcf7_k15.csv",
+edges <- read_csv(graphEdgeFile,
                   col_types = cols(
                     src    = col_character(),
                     dist   = col_character(),
@@ -26,12 +37,12 @@ edges <- read_csv("../data/gridsearch/graph_edges_mcf7_k15.csv",
 g <- graph_from_data_frame(edges, directed = FALSE)
 E(g)$weight <- edges$weight
 
-metadata   <- read.table("../data/siginfo_beta.txt",    sep = "\t", header = TRUE)
-cp_info    <- read.table("../data/compoundinfo_beta.txt",
+metadata   <- read.table(sigInfoFile,    sep = "\t", header = TRUE)
+cp_info    <- read.table(cpInfoFile,
                          sep = "\t", header = TRUE,
                          fill = TRUE, quote = "", comment.char = "")
-atc_info   <- read_csv("../data/drug2atc.csv")
-umap_coords <- read_csv("../data/MCF7_umap.csv")
+atc_info   <- read_csv(atcInfoFile)
+umap_coords <- read_csv(umapCoordsFile)
 
 # --- de-duplicate cp_info & atc_info to avoid many-to-many joins --- #
 cp_info_unique <- cp_info %>%
@@ -50,7 +61,7 @@ metadata <- metadata %>%
   left_join(umap_coords,     by = "sig_id") %>%
   left_join(atc_info_unique, by = "inchi_key")
 
-partition <- readr::read_csv("../data/gridsearch/partition_mcf7_k15_g50.csv",
+partition <- readr::read_csv(partitionFile,
                              col_types = cols(
                                node      = col_character(),
                                node_id   = col_character(),

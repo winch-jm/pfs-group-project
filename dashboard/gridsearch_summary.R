@@ -4,7 +4,7 @@ library(igraph)
 #-----------------------------
 # Paths & metadata
 #-----------------------------
-grid_dir   <- "../data/gridsearch/"
+grid_dir   <- "../test/gridsearch/"
 siginfo    <- "../data/siginfo_beta.txt"
 
 metadata   <- read.table("../data/siginfo_beta.txt",    sep = "\t", header = TRUE)
@@ -87,7 +87,7 @@ k_values <- c(10, 15, 20, 25)
 graphs_by_k <- map(
   k_values,
   ~ {
-    edge_path <- file.path(grid_dir, sprintf("graph_edges_mcf7_k%d.csv", .x))
+    edge_path <- file.path(grid_dir, sprintf("pfsDemo_graph_edges_k%d.csv", .x))
     edges <- readr::read_csv(
       edge_path,
       col_types = cols(
