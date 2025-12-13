@@ -71,6 +71,8 @@ Key capabilities:
 └── notebooks  <- python notebooks used to preprocess data
 ```
 ## **How To Run**
+1. Download mcf7_subset_pca.csv file and place in /data sub-directory in folder
+2. Run command listed below:
 ```
 ./code dataset prefix outputDir gridSearch k(optional) gamma(optional)
 
@@ -81,3 +83,4 @@ Key capabilities:
 - gridSearch: true or false, if user wants to find optimal hyperparameters
 - k: neighbors in initial graph
 - gamma: float hyperparameter
+Dow
